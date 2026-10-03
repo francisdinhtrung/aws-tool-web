@@ -7,7 +7,7 @@ set -euo pipefail
 
 REPO="francisdinhtrung/aws-tool-web"
 VERSION="${1:-$(jq -r .version "$(dirname "$0")/../server/package.json")}"
-SHORT_DESC="Self-hosted AWS web UI: DynamoDB Studio, S3 browser, CloudWatch Logs, SQS, Lambda console"
+SHORT_DESC="Self-hosted AWS web UI: DynamoDB Studio, S3 browser, CloudWatch Logs, SQS, Lambda, Step Functions"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 USER_NAME="${REPO%%/*}"
 

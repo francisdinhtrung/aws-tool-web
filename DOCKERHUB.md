@@ -21,7 +21,7 @@ docker run -d --name aws-tool-web \
   -p 127.0.0.1:8080:8080 \
   -v ~/.aws:/root/.aws \
   -v aws-tool-web-data:/data \
-  francisdinhtrung/aws-tool-web:1.1.0
+  francisdinhtrung/aws-tool-web:1.2.0
 ```
 
 Open http://localhost:8080
@@ -33,7 +33,7 @@ Mount `~/.aws` read-only (`-v ~/.aws:/root/.aws:ro`) if you don't want the app t
 ```yaml
 services:
   aws-tool-web:
-    image: francisdinhtrung/aws-tool-web:1.1.0
+    image: francisdinhtrung/aws-tool-web:1.2.0
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -62,6 +62,7 @@ volumes:
 | CloudWatch Logs | Log groups, filter patterns, time ranges, histogram, level highlighting, JSON view, context lines, live tail, export, shareable URLs, Logs Insights with saved queries and charts. |
 | SQS | Standard/FIFO queues, send/poll/delete messages, purge, settings, DLQ redrive, access policy, tags. |
 | Lambda | Create functions (inline starter code, .zip, S3, container image; pick or create the execution role). Browse, edit and deploy the code package in the browser. Test events with templates, sync/async invoke, response, log tail and REPORT stats. CloudWatch metrics and recent invocations. Memory, timeout, /tmp, runtime, handler, env vars, layers, VPC, logging, X-Ray, DLQ. Event source mappings, resource policy, versions, weighted aliases, function URLs (CORS), reserved/provisioned concurrency, async destinations, tags. Layers. |
+| Step Functions | State machines (Standard/Express) from templates with a live graph preview and static checks. Start, stop, redrive and re-run executions; execution view with the graph colored per state, per-state input/output, event history, Map runs. Definition editor with validation, single-state testing (`TestState`), versions and weighted aliases, logging, X-Ray, tags. Activities. |
 
 ## Environment variables
 
@@ -90,7 +91,9 @@ Anyone who can reach this app has the full permissions of the AWS credentials it
 
 ## Tags
 
-- `1.1.0`, `latest` – adds the Lambda console. Multi-arch: `linux/amd64`, `linux/arm64`
+- `1.2.0`, `latest` – adds the Step Functions console. Multi-arch: `linux/amd64`, `linux/arm64`
+- `1.1.1` – project renamed to AWS Tool Web, English UI and docs
+- `1.1.0` – adds the Lambda console
 - `1.0.0` – DynamoDB, S3, CloudWatch Logs, SQS
 
 License: MIT. Developed by Trung.Vu
