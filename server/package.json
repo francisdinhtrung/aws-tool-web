@@ -1,0 +1,33 @@
+{
+  "name": "dynamodb-studio-server",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1146.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1145.0",
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/client-iam": "^3.1146.0",
+    "@aws-sdk/client-lambda": "^3.1146.0",
+    "@aws-sdk/client-s3": "^3.1145.0",
+    "@aws-sdk/client-sqs": "^3.1145.0",
+    "@aws-sdk/client-sts": "^3.700.0",
+    "@aws-sdk/credential-providers": "^3.700.0",
+    "@aws-sdk/lib-storage": "^3.1145.0",
+    "@aws-sdk/s3-request-presigner": "^3.1145.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.3",
+    "aws-sdk-client-mock": "^4.1.0",
+    "supertest": "^7.3.0",
+    "vitest": "^5.0.3"
+  }
+}

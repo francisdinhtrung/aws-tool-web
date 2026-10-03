@@ -1,0 +1,17 @@
+name: Feature request
+description: Đề xuất tính năng / Suggest a feature
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Vấn đề cần giải quyết
+    validations: { required: true }
+  - type: textarea
+    id: solution
+    attributes:
+      label: Giải pháp đề xuất
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Cách khác đã cân nhắc

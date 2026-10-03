@@ -1,0 +1,41 @@
+name: Bug report
+description: Báo lỗi / Report a bug
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "**Không dán access key, secret key, session token hay dữ liệu nhạy cảm vào issue.**"
+  - type: textarea
+    id: what
+    attributes:
+      label: Mô tả lỗi
+      description: Chuyện gì xảy ra, bạn mong đợi điều gì?
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Các bước tái hiện
+      placeholder: "1. Mở ...\n2. Bấm ...\n3. Thấy lỗi ..."
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Khu vực
+      options: [Connections, DynamoDB, S3, CloudWatch Logs, SQS, Lambda, Data modeler, Khác]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag
+      placeholder: "francisdinhtrung/aws-tool-web:1.1.0"
+  - type: input
+    id: target
+    attributes:
+      label: Môi trường AWS
+      placeholder: "AWS thật / LocalStack / DynamoDB Local / MinIO ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log / ảnh chụp
+      description: Log container (`docker logs aws-tool-web`) hoặc console trình duyệt.
+      render: text

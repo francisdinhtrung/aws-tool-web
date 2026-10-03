@@ -1,0 +1,43 @@
+services:
+  dynamodb-studio:
+    build: .
+    image: dynamodb-studio:latest
+    container_name: dynamodb-studio
+    ports:
+      # Bound to localhost only: this app holds the power of your AWS credentials.
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Endpoint connections created on first start (name=url, comma-separated)
+      DEFAULT_ENDPOINTS: "DynamoDB Local (compose)=http://dynamodb-local:8000"
+      # Uncomment to require a login (HTTP basic auth)
+      # APP_USERNAME: admin
+      # APP_PASSWORD: change-me
+      # Host names allowed to reach the app (DNS-rebinding protection). Add yours when exposing it.
+      # ALLOWED_HOSTS: "localhost,127.0.0.1,studio.internal.example.com"
+    volumes:
+      # Your AWS profiles. Read-write so profiles can be created/edited from the UI.
+      # Use ":ro" to make profiles read-only. On Windows use ${USERPROFILE}/.aws
+      - ${HOME}/.aws:/root/.aws
+      # Saved endpoint connections and data models
+      - studio-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Optional local DynamoDB. Start everything: docker compose up -d
+  # Start only the studio:            docker compose up -d dynamodb-studio
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: dynamodb-local
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
+    working_dir: /home/dynamodblocal
+    user: root
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - dynamodb-local-data:/home/dynamodblocal/data
+    restart: unless-stopped
+
+volumes:
+  studio-data:
+  dynamodb-local-data:

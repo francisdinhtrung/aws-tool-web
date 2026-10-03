@@ -1,0 +1,21 @@
+# Dependencies & build output
+node_modules/
+dist/
+coverage/
+
+# Local app data (connections, models)
+data/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & OS / editor files
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Local Claude Code config (machine-specific paths)
+.claude/
