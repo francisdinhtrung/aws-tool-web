@@ -7,9 +7,10 @@ Self-hosted web UI for everyday AWS work, running in a single container:
 - **CloudWatch Logs** – log viewer, live tail and Logs Insights
 - **SQS** – queue manager (send, poll, DLQ redrive)
 - **Lambda** – function console (inline code editor, test events, metrics, configuration, triggers, versions & aliases, function URLs)
+- **Step Functions** – workflow console (definition editor with a live graph, executions state by state, single-state testing, versions & aliases)
 - **AWS profile manager** – edit `~/.aws/config` and `~/.aws/credentials` from the UI
 
-Works with real AWS accounts as well as DynamoDB Local, LocalStack, MinIO and ElasticMQ.
+Works with real AWS accounts as well as DynamoDB Local, LocalStack, MinIO, ElasticMQ and Step Functions Local.
 
 Source code, issues and docs: https://github.com/francisdinhtrung/aws-tool-web
 

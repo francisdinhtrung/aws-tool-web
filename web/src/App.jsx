@@ -31,6 +31,13 @@ import LambdaLayers from './pages/LambdaLayers.jsx';
 import LambdaSidebar from './components/LambdaSidebar.jsx';
 import { CreateFunctionModal } from './components/LambdaModals.jsx';
 import { listAllFunctions, lambdaPath } from './lib/lambda.js';
+import SfnHome from './pages/SfnStateMachines.jsx';
+import SfnStateMachine from './pages/SfnStateMachine.jsx';
+import SfnExecution from './pages/SfnExecution.jsx';
+import SfnActivities from './pages/SfnActivities.jsx';
+import SfnSidebar from './components/SfnSidebar.jsx';
+import { CreateStateMachineModal } from './components/SfnModals.jsx';
+import { listAllStateMachines, sfnPath } from './lib/sfn.js';
 
 // Sections that belong to one service; anything else (home, connections) keeps the last workspace.
 const DDB_SECTIONS = new Set(['table', 'ops', 'partiql', 'modeler']);
@@ -41,6 +48,7 @@ const WORKSPACES = [
   ['logs', 'CloudWatch', '📜', 'CloudWatch Logs', '/logs'],
   ['sqs', 'SQS', '📨', 'SQS Console', '/sqs'],
   ['lambda', 'Lambda', 'λ', 'Lambda Console', '/lambda'],
+  ['sfn', 'Step Functions', '⛓', 'Step Functions', '/sfn'],
 ];
 
 const connValue = (c) => (!c ? '' : c.kind === 'profile' ? `p:${c.profile}` : c.kind === 'endpoint' ? `e:${c.id}` : 'd');
@@ -76,6 +84,8 @@ function Shell() {
   const [queuesState, setQueuesState] = useState({ loading: false, error: null, loaded: false, more: false });
   const [functions, setFunctions] = useState([]);
   const [functionsState, setFunctionsState] = useState({ loading: false, error: null, loaded: false, more: false });
+  const [machines, setMachines] = useState([]);
+  const [machinesState, setMachinesState] = useState({ loading: false, error: null, loaded: false, more: false });
 
   const [section, arg] = (() => {
     const parts = route.split('?')[0].split('/').filter(Boolean);
@@ -85,11 +95,13 @@ function Shell() {
   const isLogs = section === 'logs';
   const isSqs = section === 'sqs';
   const isLambda = section === 'lambda';
-  const workspace = isS3 ? 's3' : isLogs ? 'logs' : isSqs ? 'sqs' : isLambda ? 'lambda' : DDB_SECTIONS.has(section) ? 'dynamodb' : savedWorkspace;
+  const isSfn = section === 'sfn';
+  const workspace = isS3 ? 's3' : isLogs ? 'logs' : isSqs ? 'sqs' : isLambda ? 'lambda' : isSfn ? 'sfn' : DDB_SECTIONS.has(section) ? 'dynamodb' : savedWorkspace;
   const s3ws = workspace === 's3';
   const logsws = workspace === 'logs';
   const sqsws = workspace === 'sqs';
   const lambdaws = workspace === 'lambda';
+  const sfnws = workspace === 'sfn';
   const ws = WORKSPACES.find((w) => w[0] === workspace) || WORKSPACES[0];
 
   // Remember the workspace when entering a service-specific page (only on route change, so the switcher can override it).
@@ -98,6 +110,7 @@ function Shell() {
     else if (section === 'logs') setSavedWorkspace('logs');
     else if (section === 'sqs') setSavedWorkspace('sqs');
     else if (section === 'lambda') setSavedWorkspace('lambda');
+    else if (section === 'sfn') setSavedWorkspace('sfn');
     else if (DDB_SECTIONS.has(section)) setSavedWorkspace('dynamodb');
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,10 +119,10 @@ function Shell() {
     document.title = `${ws[3]} · AWS Tool Web`;
   }, [workspace, ws]);
 
-  // S3, CloudWatch, SQS and Lambda have no home page of their own: their home is the bucket / log group / queue / function list.
+  // S3, CloudWatch, SQS, Lambda and Step Functions have no home page of their own: their home is the resource list.
   useEffect(() => {
-    if (!section && (s3ws || logsws || sqsws || lambdaws)) navigate(ws[4]);
-  }, [s3ws, logsws, sqsws, lambdaws, section, ws]);
+    if (!section && (s3ws || logsws || sqsws || lambdaws || sfnws)) navigate(ws[4]);
+  }, [s3ws, logsws, sqsws, lambdaws, sfnws, section, ws]);
 
   const switchWorkspace = (w) => {
     setSavedWorkspace(w);
@@ -196,6 +209,19 @@ function Shell() {
     }
   }, [conn]);
 
+  const reloadMachines = useCallback(async () => {
+    if (!conn) return setMachines([]);
+    setMachinesState({ loading: true, error: null, loaded: false, more: false });
+    try {
+      const { machines: list, more } = await listAllStateMachines();
+      setMachines(list);
+      setMachinesState({ loading: false, error: null, loaded: true, more });
+    } catch (e) {
+      setMachines([]);
+      setMachinesState({ loading: false, error: errorText(e), loaded: true, more: false });
+    }
+  }, [conn]);
+
   const toggleLogFavorite = useCallback(
     (name) => setLogFavorites((f) => (f.includes(name) ? f.filter((x) => x !== name) : [...f, name].sort())),
     [setLogFavorites],
@@ -235,10 +261,12 @@ function Shell() {
     () => ({
       conn, setConn, profiles, endpoints, reloadConnections, tables, reloadTables, info, buckets, bucketInfo, bucketsState, reloadBuckets, workspace,
       logGroups, logGroupsState, reloadLogGroups, logFavorites, toggleLogFavorite, queues, queuesState, reloadQueues, functions, functionsState, reloadFunctions,
+      machines, machinesState, reloadMachines,
     }),
     [
       conn, setConn, profiles, endpoints, reloadConnections, tables, reloadTables, info, buckets, bucketInfo, bucketsState, reloadBuckets, workspace,
       logGroups, logGroupsState, reloadLogGroups, logFavorites, toggleLogFavorite, queues, queuesState, reloadQueues, functions, functionsState, reloadFunctions,
+      machines, machinesState, reloadMachines,
     ],
   );
 
@@ -264,6 +292,15 @@ function Shell() {
     if (lambdaws) reloadFunctions();
   }, [lambdaws, reloadFunctions]);
 
+  useEffect(() => {
+    if (sfnws) reloadMachines();
+  }, [sfnws, reloadMachines]);
+
+  const sfnArg = isSfn ? arg.split('/') : [];
+  const currentMachine = sfnArg[0] === 'machine' && sfnArg[1] ? decodeURIComponent(sfnArg[1]) : '';
+  const currentExecution = sfnArg[0] === 'execution' && sfnArg[1] ? decodeURIComponent(sfnArg[1]) : '';
+  const machineOfExecution = currentExecution ? currentExecution.split(':')[6] || '' : '';
+
   const lambdaArg = isLambda ? arg.split('/') : [];
   const currentFunction = lambdaArg[0] === 'function' && lambdaArg[1] ? decodeURIComponent(lambdaArg[1]) : '';
 
@@ -283,6 +320,10 @@ function Shell() {
   else if (isSqs) page = <SqsHome key={connValue(conn)} onCreate={() => setCreating('queue')} />;
   else if (isLambda && currentFunction && conn) page = <LambdaFunction key={`${connValue(conn)}:${currentFunction}`} name={currentFunction} />;
   else if (isLambda && lambdaArg[0] === 'layers') page = <LambdaLayers key={connValue(conn)} />;
+  else if (isSfn && currentExecution && conn) page = <SfnExecution key={`${connValue(conn)}:${currentExecution}`} arn={currentExecution} />;
+  else if (isSfn && currentMachine && conn) page = <SfnStateMachine key={`${connValue(conn)}:${currentMachine}`} name={currentMachine} />;
+  else if (isSfn && sfnArg[0] === 'activities') page = <SfnActivities key={connValue(conn)} />;
+  else if (isSfn) page = <SfnHome key={connValue(conn)} onCreate={() => setCreating('machine')} />;
   else if (isLambda) page = <LambdaHome key={connValue(conn)} onCreate={() => setCreating('function')} />;
   else if (!conn && section !== 'modeler') page = <Home />;
   else if (section === 'table' && arg) page = <TableView key={`${connValue(conn)}:${arg}`} name={decodeURIComponent(arg)} />;
@@ -356,7 +397,17 @@ function Shell() {
         </header>
 
         <aside className="sidebar">
-          {lambdaws ? (
+          {sfnws ? (
+            <SfnSidebar
+              conn={conn}
+              machines={machines}
+              state={machinesState}
+              reload={reloadMachines}
+              current={currentMachine || machineOfExecution}
+              page={isSfn ? (currentMachine || currentExecution ? 'machine' : sfnArg[0] || 'home') : section}
+              onCreate={() => setCreating('machine')}
+            />
+          ) : lambdaws ? (
             <LambdaSidebar
               conn={conn}
               functions={functions}
@@ -399,7 +450,7 @@ function Shell() {
               <a href="#/modeler" className={section === 'modeler' ? 'active' : ''}>▦ Data modeler</a>
             </nav>
           )}
-          {logsws || sqsws || lambdaws ? null : s3ws ? (
+          {logsws || sqsws || lambdaws || sfnws ? null : s3ws ? (
             <>
               <div className="side-head">
                 <span>Buckets {conn && <span className="muted">({buckets.length})</span>}</span>
@@ -450,6 +501,16 @@ function Shell() {
         <main className="main">{page}</main>
         <TransfersDock />
 
+        {creating === 'machine' && (
+          <CreateStateMachineModal
+            onClose={() => setCreating(false)}
+            onCreated={async (name) => {
+              setCreating(false);
+              await reloadMachines();
+              navigate(sfnPath(name));
+            }}
+          />
+        )}
         {creating === 'function' && (
           <CreateFunctionModal
             onClose={() => setCreating(false)}

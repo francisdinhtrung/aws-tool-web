@@ -305,4 +305,51 @@ describe('<App>', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/lambda/function/new-fn'));
     expect(api.calls('POST /api/lambda/op/CreateFunction')[0]).toMatchObject({ FunctionName: 'new-fn', Runtime: 'nodejs22.x', Handler: 'index.handler', Role: 'arn:aws:iam::123:role/r', Code: { ZipFile: 'UEs=' } });
   });
+
+  it('the Step Functions workspace lists state machines, opens one and an execution, and creates one', async () => {
+    const ARN = 'arn:aws:states:us-west-2:123:stateMachine:orders';
+    const EX = 'arn:aws:states:us-west-2:123:execution:orders:run-1';
+    const DEF = JSON.stringify({ StartAt: 'A', States: { A: { Type: 'Pass', End: true } } });
+    const list = [{ name: 'orders', stateMachineArn: ARN, type: 'STANDARD', creationDate: '2026-01-01T00:00:00Z' }];
+    const api = backend({
+      'POST /api/sfn/op/ListStateMachines': () => ({ stateMachines: list }),
+      'POST /api/sfn/op/DescribeStateMachine': (b) => ({ ...list.find((m) => m.stateMachineArn === b.stateMachineArn), definition: DEF, roleArn: 'arn:aws:iam::123:role/r' }),
+      'POST /api/sfn/op/ListExecutions': { executions: [{ name: 'run-1', executionArn: EX, status: 'SUCCEEDED', startDate: '2026-01-02T00:00:00Z' }] },
+      'POST /api/sfn/op/DescribeExecution': { name: 'run-1', executionArn: EX, stateMachineArn: ARN, status: 'SUCCEEDED', input: '{}', output: '{}', startDate: '2026-01-02T00:00:00Z' },
+      'POST /api/sfn/op/GetExecutionHistory': { events: [] },
+      'POST /api/sfn/op/DescribeStateMachineForExecution': { definition: DEF },
+      'POST /api/lambda/iam/ListRoles': { Roles: [] },
+      'POST /api/sfn/op/CreateStateMachine': (b) => {
+        list.push({ name: b.name, stateMachineArn: ARN.replace('orders', b.name), type: b.type });
+        return { stateMachineArn: ARN.replace('orders', b.name) };
+      },
+    });
+    render(<App />);
+    await screen.findByRole('option', { name: 'default' });
+    fireEvent.change(screen.getByLabelText('Connection'), { target: { value: 'p:default' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Step Functions' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/sfn'));
+    go('#/sfn');
+    expect(await screen.findByRole('heading', { name: /State machines/ })).toBeInTheDocument();
+    expect(document.title).toBe('Step Functions · AWS Tool Web');
+    expect(document.documentElement.dataset.workspace).toBe('sfn');
+    await waitFor(() => expect(api.calls('POST /api/test').at(-1)).toEqual({ service: 'sfn' }));
+
+    go('#/sfn/machine/orders');
+    expect(await screen.findByText('⛓ orders')).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: 'run-1' });
+    go(link.getAttribute('href'));
+    expect(await screen.findByRole('heading', { name: 'run-1' })).toBeInTheDocument();
+    expect(api.calls('POST /api/sfn/op/DescribeExecution')[0]).toEqual({ executionArn: EX });
+    expect(document.querySelector('.sidebar a.active[title^="orders"]')).toBeTruthy(); // sidebar keeps the state machine selected
+
+    fireEvent.click(screen.getByTitle('Create state machine'));
+    fireEvent.change(screen.getByLabelText('State machine name'), { target: { value: 'flow' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enter role ARN' }));
+    fireEvent.change(screen.getByLabelText('Role ARN'), { target: { value: 'arn:aws:iam::123:role/r' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create state machine' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/sfn/machine/flow'));
+    expect(await screen.findByText('⛓ flow')).toBeInTheDocument();
+    expect(api.calls('POST /api/sfn/op/CreateStateMachine')[0]).toMatchObject({ name: 'flow', type: 'STANDARD', roleArn: 'arn:aws:iam::123:role/r' });
+  });
 });
