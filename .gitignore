@@ -19,3 +19,6 @@ data/
 
 # Local Claude Code config (machine-specific paths)
 .claude/
+
+# Portable builds
+release/
