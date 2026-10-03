@@ -189,6 +189,9 @@ function EndpointModal({ endpoint, profiles, onClose, onSaved, s3, cwl, mq, fx }
           <Field label="Lambda endpoint URL (optional)" hint="Used by Lambda (and its IAM / CloudWatch calls) when it runs on another URL. Empty = same as the endpoint above.">
             <input value={v.lambdaEndpoint || ''} onChange={(e) => set({ lambdaEndpoint: e.target.value })} placeholder="(same as endpoint URL)" />
           </Field>
+          <Field label="Step Functions endpoint URL (optional)" hint="Used by Step Functions when it runs on another URL, e.g. Step Functions Local http://localhost:8083. Empty = same as the endpoint above.">
+            <input value={v.sfnEndpoint || ''} onChange={(e) => set({ sfnEndpoint: e.target.value })} placeholder="(same as endpoint URL)" />
+          </Field>
         </>
       )}
       <div className="grid-2">
@@ -220,6 +223,7 @@ export default function Connections() {
   const cwl = workspace === 'logs';
   const mq = workspace === 'sqs';
   const fx = workspace === 'lambda';
+  const sf = workspace === 'sfn';
   const toast = useToast();
   const [info, setInfo] = useState(null);
   const [editing, setEditing] = useState(null); // {kind:'profile'|'endpoint', value}
@@ -234,7 +238,9 @@ export default function Connections() {
     try {
       const r = await api('/api/test', { method: 'POST', body: { service: workspace }, conn: c });
       const what =
-        r.functionCount !== undefined
+        r.stateMachineCount !== undefined
+          ? `${r.stateMachineCount}${r.more ? '+' : ''} state machines in ${r.region}`
+          : r.functionCount !== undefined
           ? `${r.functionCount}${r.more ? '+' : ''} functions in ${r.region}`
           : r.logGroupCount !== undefined
           ? `${r.logGroupCount}${r.more ? '+' : ''} log groups in ${r.region}`
@@ -328,14 +334,14 @@ export default function Connections() {
           <h3>Custom endpoints</h3>
           <button className="btn btn-primary btn-sm" onClick={() => setEditing({ kind: 'endpoint', value: null })}>+ New endpoint</button>
         </div>
-        <div className="muted small">{s3 ? 'MinIO, LocalStack or any S3-compatible storage.' : cwl ? 'LocalStack or any CloudWatch Logs-compatible endpoint.' : mq ? 'LocalStack, ElasticMQ or any SQS-compatible endpoint.' : fx ? 'LocalStack or any Lambda-compatible endpoint.' : 'DynamoDB Local, LocalStack or any DynamoDB-compatible endpoint.'}</div>
+        <div className="muted small">{s3 ? 'MinIO, LocalStack or any S3-compatible storage.' : cwl ? 'LocalStack or any CloudWatch Logs-compatible endpoint.' : mq ? 'LocalStack, ElasticMQ or any SQS-compatible endpoint.' : fx ? 'LocalStack or any Lambda-compatible endpoint.' : sf ? 'LocalStack, Step Functions Local or any Step Functions-compatible endpoint.' : 'DynamoDB Local, LocalStack or any DynamoDB-compatible endpoint.'}</div>
         <table className="grid grid-plain">
           <thead><tr><th>Name</th><th>Endpoint</th><th>Region</th><th>Credentials</th><th>Test</th><th /></tr></thead>
           <tbody>
             {endpoints.map((e) => (
               <tr key={e.id}>
                 <td><strong>{e.name}</strong>{conn?.kind === 'endpoint' && conn.id === e.id && <span className="badge badge-ok">active</span>}</td>
-                <td><code>{s3 ? e.s3Endpoint || e.endpoint : cwl ? e.logsEndpoint || e.endpoint : mq ? e.sqsEndpoint || e.endpoint : fx ? e.lambdaEndpoint || e.endpoint : e.endpoint}</code></td>
+                <td><code>{s3 ? e.s3Endpoint || e.endpoint : cwl ? e.logsEndpoint || e.endpoint : mq ? e.sqsEndpoint || e.endpoint : fx ? e.lambdaEndpoint || e.endpoint : sf ? e.sfnEndpoint || e.endpoint : e.endpoint}</code></td>
                 <td>{e.region}</td>
                 <td>{e.authMode === 'profile' ? `profile ${e.profile}` : e.authMode === 'keys' ? 'access keys' : 'dummy'}</td>
                 <td><TestCell k={`e:${e.id}`} /></td>

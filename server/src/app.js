@@ -12,6 +12,7 @@ import { s3Routes } from './s3.js';
 import { logsRoutes } from './logs.js';
 import { sqsRoutes } from './sqs.js';
 import { lambdaRoutes } from './lambda.js';
+import { sfnRoutes } from './sfn.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -126,6 +127,8 @@ export function cleanEndpoint(body, old = {}) {
   if (sqsEndpoint && !/^https?:\/\/.+/i.test(sqsEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'SQS endpoint must be an http(s) URL');
   const lambdaEndpoint = String(body.lambdaEndpoint || '').trim();
   if (lambdaEndpoint && !/^https?:\/\/.+/i.test(lambdaEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'Lambda endpoint must be an http(s) URL');
+  const sfnEndpoint = String(body.sfnEndpoint || '').trim();
+  if (sfnEndpoint && !/^https?:\/\/.+/i.test(sfnEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'Step Functions endpoint must be an http(s) URL');
   const authMode = ['local', 'keys', 'profile'].includes(body.authMode) ? body.authMode : 'local';
   return {
     name,
@@ -134,6 +137,7 @@ export function cleanEndpoint(body, old = {}) {
     logsEndpoint,
     sqsEndpoint,
     lambdaEndpoint,
+    sfnEndpoint,
     region: String(body.region || 'us-east-1').trim(),
     authMode,
     profile: authMode === 'profile' ? String(body.profile || '') : '',
@@ -205,12 +209,14 @@ export function createApp(options = {}) {
   const logs = logsRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
   const sqs = sqsRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
   const lambda = lambdaRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput, fetchImpl: options.fetchImpl });
+  const sfn = sfnRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
   const invalidateClients = () => {
     clients.clear();
     s3.clear();
     logs.clear();
     sqs.clear();
     lambda.clear();
+    sfn.clear();
   };
 
   async function getClient(req) {
@@ -306,6 +312,12 @@ export function createApp(options = {}) {
       out.more = Boolean(f.NextMarker);
       return res.json(out);
     }
+    if (req.body?.service === 'sfn') {
+      const m = await sfn.listStateMachines(c.r);
+      out.stateMachineCount = (m.stateMachines || []).length;
+      out.more = Boolean(m.nextToken);
+      return res.json(out);
+    }
     if (req.body?.service === 's3') {
       out.bucketCount = ((await s3.listBuckets(c.r)).Buckets || []).length;
       return res.json(out);
@@ -341,6 +353,7 @@ export function createApp(options = {}) {
   api.use('/logs', logs.router);
   api.use('/sqs', sqs.router);
   api.use('/lambda', lambda.router);
+  api.use('/sfn', sfn.router);
 
   api.get('/models', async (req, res) => res.json(await listModels()));
   api.get('/models/:id', async (req, res) => res.json(await getModel(req.params.id)));
