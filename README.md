@@ -41,6 +41,15 @@ Open http://localhost:8080
 - The compose file includes a DynamoDB Local service (`http://dynamodb-local:8000`); a connection to it is created on first start.
 - Run the app without DynamoDB Local: `docker compose up -d aws-tool-web`
 
+### Windows portable (no Docker, no install)
+
+Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com/francisdinhtrung/aws-tool-web/releases), extract it anywhere (a USB drive works too) and double-click `AWS Tool Web.cmd`. Node.js is bundled, so nothing has to be installed.
+
+- The app listens on `127.0.0.1:8080` and opens in the default browser; close the console window to stop it.
+- Profiles are read from and written to `%USERPROFILE%\.aws`; connections and data models live in the `data` folder next to the launcher.
+- Change settings by setting [environment variables](#environment-variables) before starting, e.g. `set PORT=9090`.
+- Build the zip yourself (macOS, Linux or Git Bash): `./scripts/build-windows-portable.sh` writes it to `release/`.
+
 ## Features
 
 | Area | What you can do |
@@ -170,6 +179,8 @@ web/src/components/     ItemEditor, QueryScanForm, Visualizer, ResultsGrid, Tabl
 ## Publishing to Docker Hub
 
 See [docs/PUBLISH.md](docs/PUBLISH.md): token stored in the Keychain, multi-arch build with Podman, push and description update.
+
+Pushing a `v*` tag also runs the *Windows portable* workflow, which builds the win-x64 zip and attaches it to the GitHub release.
 
 ## Contributing
 
