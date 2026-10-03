@@ -1,23 +1,23 @@
 # Security Policy
 
-AWS Tool Web chạy với quyền của AWS credential bạn mount vào container, nên mọi lỗ hổng đều có thể ảnh hưởng tới tài khoản AWS.
+AWS Tool Web runs with the permissions of the AWS credentials mounted into the container, so any vulnerability can affect your AWS account.
 
-## Báo lỗ hổng
+## Reporting a vulnerability
 
-**Không tạo issue công khai.** Dùng [GitHub private vulnerability reporting](https://github.com/francisdinhtrung/aws-tool-web/security/advisories/new) và mô tả:
+**Please do not open a public issue.** Use [GitHub private vulnerability reporting](https://github.com/francisdinhtrung/aws-tool-web/security/advisories/new) and include:
 
-- Phiên bản / image tag
-- Các bước tái hiện, ảnh hưởng
-- Đề xuất khắc phục (nếu có)
+- Version / image tag
+- Steps to reproduce and impact
+- Suggested fix (if any)
 
-Bạn sẽ nhận phản hồi trong vòng 7 ngày.
+You will get a response within 7 days.
 
-## Phiên bản được hỗ trợ
+## Supported versions
 
-Chỉ bản mới nhất (`latest`) nhận bản vá bảo mật.
+Only the latest release (`latest`) receives security fixes.
 
-## Khuyến nghị khi triển khai
+## Deployment recommendations
 
-- Bind cổng vào `127.0.0.1` (mặc định trong `docker-compose.yml`), không mở ra Internet.
-- Khi cần truy cập từ máy khác: bật `APP_USERNAME` / `APP_PASSWORD`, đặt `ALLOWED_HOSTS` và đặt sau reverse proxy có HTTPS.
-- Dùng IAM user/role với quyền tối thiểu; mount `~/.aws` chế độ `:ro` nếu không cần sửa profile.
+- Bind the port to `127.0.0.1` (the default in `docker-compose.yml`); do not expose it to the Internet.
+- If you need access from other machines: set `APP_USERNAME` / `APP_PASSWORD` and `ALLOWED_HOSTS`, and put the app behind a reverse proxy with HTTPS.
+- Use an IAM user/role with least privilege; mount `~/.aws` with `:ro` if you don't need to edit profiles.

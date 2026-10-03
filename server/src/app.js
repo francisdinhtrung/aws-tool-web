@@ -186,13 +186,13 @@ export function createApp(options = {}) {
       const raw = Buffer.from(String(req.headers.authorization || '').replace(/^Basic\s+/i, ''), 'base64').toString();
       const i = raw.indexOf(':');
       if (i > 0 && safeEqual(raw.slice(0, i), username) && safeEqual(raw.slice(i + 1), password)) return next();
-      res.set('WWW-Authenticate', 'Basic realm="DynamoDB Studio"').status(401).send('Authentication required');
+      res.set('WWW-Authenticate', 'Basic realm="AWS Tool Web"').status(401).send('Authentication required');
     });
   }
 
   // Custom header forces a CORS preflight, so other origins cannot fire state-changing requests (CSRF).
   app.use('/api', (req, res, next) => {
-    if (req.method !== 'GET' && req.get('x-requested-with') !== 'dynamodb-studio') {
+    if (req.method !== 'GET' && req.get('x-requested-with') !== 'aws-tool-web') {
       return res.status(403).json({ error: 'Forbidden', message: 'Missing X-Requested-With header' });
     }
     next();

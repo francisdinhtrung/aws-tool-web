@@ -14,7 +14,7 @@ import {
 
 const ddbMock = mockClient(DynamoDBClient);
 const stsMock = mockClient(STSClient);
-const H = { 'x-requested-with': 'dynamodb-studio' };
+const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 
 let env;

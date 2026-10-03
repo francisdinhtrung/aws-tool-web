@@ -103,7 +103,7 @@ function Shell() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-workspace', workspace);
-    document.title = ws[3];
+    document.title = `${ws[3]} · AWS Tool Web`;
   }, [workspace, ws]);
 
   // S3, CloudWatch, SQS and Lambda have no home page of their own: their home is the bucket / log group / queue / function list.

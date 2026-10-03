@@ -141,7 +141,7 @@ export function uploadBlob(bucket, key, blob, onProgress, conn = getConn()) {
   const promise = new Promise((resolve, reject) => {
     const q = new URLSearchParams({ bucket, key });
     xhr.open('PUT', `/api/s3/object?${q}`);
-    xhr.setRequestHeader('x-requested-with', 'dynamodb-studio');
+    xhr.setRequestHeader('x-requested-with', 'aws-tool-web');
     if (conn) xhr.setRequestHeader('x-conn', encodeURIComponent(JSON.stringify(conn)));
     xhr.setRequestHeader('x-object-content-type', blob.type || guessType(key));
     xhr.setRequestHeader('content-type', 'application/octet-stream');

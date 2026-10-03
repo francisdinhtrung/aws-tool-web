@@ -21,7 +21,7 @@ describe('api', () => {
     expect(url).toBe('/api/x');
     expect(init).toMatchObject({ method: 'POST', body: '{"a":1}' });
     expect(init.headers).toEqual({
-      'x-requested-with': 'dynamodb-studio',
+      'x-requested-with': 'aws-tool-web',
       'x-conn': encodeURIComponent('{"kind":"profile","profile":"p"}'),
       'content-type': 'application/json',
     });
@@ -30,7 +30,7 @@ describe('api', () => {
   it('GET without body or connection; explicit conn overrides; conn null removes header', async () => {
     const f = respond(200, [1, 2]);
     expect(await api('/api/list')).toEqual([1, 2]);
-    expect(f.mock.calls[0][1]).toMatchObject({ method: 'GET', body: undefined, headers: { 'x-requested-with': 'dynamodb-studio' } });
+    expect(f.mock.calls[0][1]).toMatchObject({ method: 'GET', body: undefined, headers: { 'x-requested-with': 'aws-tool-web' } });
 
     setConn({ kind: 'default' });
     await api('/api/y', { conn: { kind: 'endpoint', id: 'e' } });

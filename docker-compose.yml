@@ -1,8 +1,8 @@
 services:
-  dynamodb-studio:
+  aws-tool-web:
     build: .
-    image: dynamodb-studio:latest
-    container_name: dynamodb-studio
+    image: aws-tool-web:latest
+    container_name: aws-tool-web
     ports:
       # Bound to localhost only: this app holds the power of your AWS credentials.
       - "127.0.0.1:8080:8080"
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
 
   # Optional local DynamoDB. Start everything: docker compose up -d
-  # Start only the studio:            docker compose up -d dynamodb-studio
+  # Start only the studio:            docker compose up -d aws-tool-web
   dynamodb-local:
     image: amazon/dynamodb-local:latest
     container_name: dynamodb-local

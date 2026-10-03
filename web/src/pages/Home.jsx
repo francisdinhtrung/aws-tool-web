@@ -6,8 +6,8 @@ export default function Home() {
   return (
     <div className="page">
       <div className="hero">
-        <h1>DynamoDB Studio</h1>
-        <p className="muted">A self-hosted, browser-based replacement for NoSQL Workbench: manage AWS profiles, explore and edit data, build operations, run PartiQL and design data models.</p>
+        <h1>AWS Tool Web</h1>
+        <p className="muted">A self-hosted web console for AWS. DynamoDB Studio replaces NoSQL Workbench: manage AWS profiles, explore and edit data, build operations, run PartiQL and design data models. S3, CloudWatch Logs, SQS and Lambda are one click away in the top bar.</p>
       </div>
       {!conn ? (
         <div className="card">

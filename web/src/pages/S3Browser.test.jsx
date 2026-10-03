@@ -248,7 +248,7 @@ describe('object browser', () => {
     await waitFor(() => expect(screen.getByText('Done')).toBeInTheDocument());
     expect(sent[0].method).toBe('PUT');
     expect(sent[0].url).toBe('/api/s3/object?bucket=b&key=p%2Fnew.txt');
-    expect(sent[0].headers).toMatchObject({ 'x-requested-with': 'dynamodb-studio', 'x-object-content-type': 'text/plain' });
+    expect(sent[0].headers).toMatchObject({ 'x-requested-with': 'aws-tool-web', 'x-object-content-type': 'text/plain' });
     expect(JSON.parse(decodeURIComponent(sent[0].headers['x-conn']))).toEqual({ kind: 'endpoint', id: 'e1' });
     vi.unstubAllGlobals();
   });

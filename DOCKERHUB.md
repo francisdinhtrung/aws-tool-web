@@ -11,6 +11,8 @@ Self-hosted web UI for everyday AWS work, running in a single container:
 
 Works with real AWS accounts as well as DynamoDB Local, LocalStack, MinIO and ElasticMQ.
 
+Source code, issues and docs: https://github.com/francisdinhtrung/aws-tool-web
+
 ## Quick start
 
 ```bash
@@ -90,4 +92,4 @@ Anyone who can reach this app has the full permissions of the AWS credentials it
 - `1.1.0`, `latest` – adds the Lambda console. Multi-arch: `linux/amd64`, `linux/arm64`
 - `1.0.0` – DynamoDB, S3, CloudWatch Logs, SQS
 
-Developed by Trung.Vu
+License: MIT. Developed by Trung.Vu

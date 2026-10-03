@@ -13,7 +13,7 @@ import { contentDisposition, s3ClientConfig, INLINE_TYPES } from '../src/s3.js';
 
 const s3Mock = mockClient(S3Client);
 const ddbMock = mockClient(DynamoDBClient);
-const H = { 'x-requested-with': 'dynamodb-studio' };
+const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 const PROFILE = conn({ kind: 'profile', profile: 'default', region: 'us-west-2' });
 

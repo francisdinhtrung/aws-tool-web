@@ -1,5 +1,5 @@
 {
-  "name": "dynamodb-studio-server",
+  "name": "aws-tool-web-server",
   "version": "1.1.0",
   "private": true,
   "type": "module",

@@ -1,153 +1,168 @@
-# DynamoDB Studio
+# AWS Tool Web
 
 [![CI](https://github.com/francisdinhtrung/aws-tool-web/actions/workflows/ci.yml/badge.svg)](https://github.com/francisdinhtrung/aws-tool-web/actions/workflows/ci.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/francisdinhtrung/aws-tool-web?sort=semver&label=docker)](https://hub.docker.com/r/francisdinhtrung/aws-tool-web)
 [![Docker Pulls](https://img.shields.io/docker/pulls/francisdinhtrung/aws-tool-web)](https://hub.docker.com/r/francisdinhtrung/aws-tool-web)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Web app chạy bằng Docker, thay thế Amazon DynamoDB NoSQL Workbench: quản lý AWS profile, duyệt và sửa dữ liệu, Operation builder kèm sinh code, PartiQL, Data modeler (tương thích file model của Workbench). Kèm **S3 browser** dùng như trình quản lý file (giống S3 Browser), **CloudWatch Logs** để tìm, live tail và query log, **SQS** và **Lambda console**.
+A self-hosted web console for everyday AWS work, running in a single Docker container:
 
-## Chạy nhanh
+- **DynamoDB Studio** – a browser-based replacement for Amazon DynamoDB NoSQL Workbench: explore and edit data, Operation builder with code generation, PartiQL, Data modeler (compatible with Workbench model files)
+- **S3 browser** – file-manager style bucket and object explorer
+- **CloudWatch Logs** – search, live tail and Logs Insights
+- **SQS** – queue manager (send, poll, DLQ redrive)
+- **Lambda** – function console (inline code editor, test events, metrics, configuration, triggers, versions and aliases, function URLs)
+- **AWS profile manager** – edit `~/.aws/config` and `~/.aws/credentials` from the UI
+
+Works with real AWS accounts as well as DynamoDB Local, LocalStack, MinIO and ElasticMQ.
+
+## Quick start
+
+From Docker Hub:
+
+```bash
+docker run -d --name aws-tool-web \
+  -p 127.0.0.1:8080:8080 \
+  -v ~/.aws:/root/.aws \
+  -v aws-tool-web-data:/data \
+  francisdinhtrung/aws-tool-web:latest
+```
+
+From source, with DynamoDB Local:
 
 ```bash
 docker compose up -d --build
 ```
 
-Mở http://localhost:8080
+Open http://localhost:8080
 
-- `~/.aws` được mount vào container ở chế độ đọc-ghi, nên profile tạo/sửa trên web sẽ được ghi thẳng vào `~/.aws/config` và `~/.aws/credentials`. Trước mỗi lần ghi, file cũ được sao lưu thành `*.bak`.
-- Compose có sẵn service DynamoDB Local (`http://dynamodb-local:8000`), lần đầu chạy kết nối này được tạo tự động.
-- Chỉ chạy Studio, không kèm DynamoDB Local: `docker compose up -d dynamodb-studio`
+- `~/.aws` is mounted read-write, so profiles created or edited in the UI are written straight to `~/.aws/config` and `~/.aws/credentials`. The previous file is backed up as `*.bak` before every write. Mount it with `:ro` to keep profiles read-only.
+- The compose file includes a DynamoDB Local service (`http://dynamodb-local:8000`); a connection to it is created on first start.
+- Run the app without DynamoDB Local: `docker compose up -d aws-tool-web`
 
-Nếu không dùng compose:
+## Features
 
-```bash
-docker build -t dynamodb-studio .
-docker run -d -p 127.0.0.1:8080:8080 -v ~/.aws:/root/.aws -v dynamodb-studio-data:/data dynamodb-studio
-```
-
-## Tính năng
-
-| Nhóm | Chức năng |
+| Area | What you can do |
 |---|---|
-| Connections | Liệt kê, tạo, sửa, đổi tên, xoá AWS profile: access key, SSO, assume role, credential_process, thêm setting tuỳ ý. Comment và block lồng nhau trong file config được giữ nguyên. Endpoint tuỳ chỉnh (DynamoDB Local, LocalStack). Default credential chain (biến môi trường / IAM role của EC2, ECS). Nút test kết nối (STS GetCallerIdentity + ListTables). Chọn region. |
-| Tables | Liệt kê, lọc, tạo bảng (GSI, LSI, on-demand hoặc provisioned, table class, streams, deletion protection). Xoá bảng. Xem tổng quan. |
-| Explore items | Scan và Query (trên bảng, GSI, LSI); điều kiện sort key; bộ lọc (=, ≠, <, between, begins_with, contains, exists, IN, attribute_type, size); projection; phân trang; strongly consistent; hiển thị RCU tiêu thụ. Tạo, sửa, nhân bản, xoá item (nhập bằng form theo kiểu dữ liệu, DynamoDB JSON hoặc plain JSON). Xoá hàng loạt. Xem dạng bảng hoặc JSON. Export CSV/JSON. Sinh code. |
-| Indexes | Tạo và xoá GSI trên bảng có sẵn. |
-| Settings | Đổi capacity mode, RCU/WCU, TTL, Streams, PITR, deletion protection, table class, tags, on-demand backup (tạo, restore, xoá). |
-| Visualizer | Aggregate view như Workbench: nhóm theo partition key, xem theo GSI, tô màu theo entity type (prefix của sort key hoặc theo attribute), xem theo facet. |
-| Import / Export | Export toàn bảng ra CSV, JSON, DynamoDB JSON, JSON lines. Import từ CSV (header có thể kèm kiểu, ví dụ `price (N)`) hoặc JSON; batch write có retry. Xoá toàn bộ item. |
-| Operation builder | GetItem, PutItem, UpdateItem (SET, REMOVE, ADD, DELETE, increment, list_append, if_not_exists), DeleteItem, Query, Scan, BatchGetItem, BatchWriteItem, TransactGetItems, TransactWriteItems, ExecuteStatement, BatchExecuteStatement, ExecuteTransaction. Có condition expression và ReturnValues; sửa thẳng request JSON được. Sinh code **Python (boto3)**, **JavaScript (SDK v3)**, **AWS CLI**. |
-| PartiQL editor | Chạy lệnh đơn, batch hoặc transaction; phân trang qua NextToken; lưu lịch sử; export kết quả. |
-| S3 browser | Danh sách bucket ở sidebar; tạo bucket (chọn region, bật versioning), xoá bucket (tuỳ chọn xoá sạch object và version trước). Duyệt object như file manager: breadcrumb, gõ thẳng đường dẫn `s3://bucket/prefix`, sắp xếp, lọc, phân trang (Load more / Load all). Upload file và cả thư mục (nút hoặc kéo thả), multipart cho file lớn, hàng đợi Tasks có tiến độ và huỷ. Download (nhiều file, cả thư mục), tạo folder, tạo file text, copy / move / rename (đệ quy, sang bucket khác), copy/cut/paste, xoá (đệ quy). Panel chi tiết: preview ảnh, video, audio, PDF, text (sửa và lưu file text), properties, sửa metadata và storage class, tags, versions (tải, khôi phục, xoá version). Pre-signed URL. Bucket properties: versioning, block public access, tags, policy, CORS, lifecycle. Menu chuột phải và phím tắt (Del, F2, Enter, Backspace, Ctrl+A/C/X/V). |
-| CloudWatch Logs | Danh sách log group (lọc, sắp xếp, favorite, retention, dung lượng). Log viewer: chọn thời gian nhanh (5m…1w, tự gõ `45m`) hoặc tuyệt đối, giờ local/UTC; filter pattern của CloudWatch kèm ví dụ bấm là dùng; lọc theo log stream; histogram số event theo thời gian (bấm cột để zoom); tô màu theo level, lọc nhanh ERROR/WARN/INFO/DEBUG, tìm trong kết quả, highlight từ khoá; log JSON hiển thị gọn (message + key=value), mở ra xem cây JSON; xem các dòng xung quanh một event; live tail; export JSON/CSV/.log; URL giữ nguyên bộ lọc để chia sẻ. Logs Insights: chọn nhiều log group, mẫu query (cả Lambda), field gợi ý, lưu query, lịch sử, huỷ query, thống kê bytes scanned, biểu đồ cho kết quả `bin()`. |
-| SQS | Danh sách queue (số message available / in flight / delayed, DLQ, mã hoá), tạo queue Standard/FIFO (cấu hình, mã hoá, DLQ, tags), purge, xoá. Gửi message (attributes, delay, group/dedup ID cho FIFO, gửi N bản). Poll message (số lượng, thời gian, visibility timeout; 0 = peek), xem body/attributes, xoá, trả về queue, export JSON, copy sang form gửi. Sửa settings, redrive policy, redrive allow policy, DLQ redrive (`StartMessageMoveTask`), access policy, tags. |
-| Lambda | Danh sách function (runtime, memory, timeout, code size, arch, lọc theo tên/runtime, sắp xếp), quota tài khoản. Tạo function: viết từ đầu (code mẫu Node.js / Python / Ruby / custom runtime), upload .zip, từ S3, container image; chọn role có sẵn, nhập ARN hoặc tự tạo role kèm `AWSLambdaBasicExecutionRole`. **Code**: duyệt file trong package, sửa trực tiếp, thêm / đổi tên / xoá file, deploy (Ctrl+S, giữ quyền file, chặn ghi đè nếu code đã bị đổi), publish version, upload .zip / S3, tải .zip, đổi image. **Test**: event mẫu (API Gateway, SQS, S3, SNS, EventBridge, schedule, DynamoDB stream, Kinesis, ALB…), lưu event, invoke sync / async / dry run theo version hoặc alias, xem response, log tail, duration / billed / memory / cold start, lịch sử trong phiên. **Monitor**: biểu đồ Invocations, Errors, Throttles, Duration, Concurrency (CloudWatch), danh sách invocation gần đây từ dòng REPORT (p95, cold start), link sang log viewer và Logs Insights. **Configuration**: memory, timeout, /tmp, runtime, handler, role, X-Ray, log format/level/log group, DLQ, KMS, SnapStart, layers (chọn từ tài khoản hoặc dán ARN, sắp thứ tự), VPC. Biến môi trường (ẩn/hiện, import/export .env, kiểm tra giới hạn 4 KB và tên reserved). **Triggers**: event source mapping SQS / Kinesis / DynamoDB stream / MSK (batch, window, filter, partial batch failure, max concurrency, bật/tắt), push trigger suy ra từ resource policy. **Permissions**: execution role và policy đính kèm (attach managed policy hay dùng), resource-based policy (thêm theo preset API Gateway / S3 / SNS / EventBridge…, xoá statement). **Versions & aliases**: publish, xoá version, alias kèm weighted routing (canary). **Function URL**: tạo / sửa / xoá, auth IAM hoặc public, CORS, response streaming. **Concurrency & async**: reserved concurrency, throttle, provisioned concurrency, retry / max event age / destination. Tags. **Layers**: danh sách, các version, function đang dùng, publish version mới từ .zip. |
-| Data modeler | Nhiều model, mỗi model nhiều bảng: key, non-key attribute, GSI, facet, sample data (thêm bằng form, import CSV/JSON). Import và export file model của NoSQL Workbench (.json). Import model từ bảng DynamoDB có sẵn. Commit lên DynamoDB (tạo bảng và ghi sample data). Export CloudFormation. |
+| Connections | List, create, edit, rename and delete AWS profiles: access keys, SSO, assume role, credential_process, arbitrary extra settings. Comments and nested blocks in the config file are preserved. Custom endpoints (DynamoDB Local, LocalStack). Default credential chain (environment variables / EC2 or ECS IAM role). Connection test (STS GetCallerIdentity + ListTables). Region picker. |
+| Tables | List, filter and create tables (GSI, LSI, on-demand or provisioned, table class, streams, deletion protection). Delete tables. Table overview. |
+| Explore items | Scan and Query (on the table, a GSI or an LSI); sort key conditions; filters (=, ≠, <, between, begins_with, contains, exists, IN, attribute_type, size); projection; pagination; strongly consistent reads; consumed RCU. Create, edit, duplicate and delete items (typed form, DynamoDB JSON or plain JSON). Bulk delete. Table or JSON view. Export CSV/JSON. Code generation. |
+| Indexes | Create and delete GSIs on existing tables. |
+| Settings | Capacity mode, RCU/WCU, TTL, Streams, PITR, deletion protection, table class, tags, on-demand backups (create, restore, delete). |
+| Visualizer | Workbench-style aggregate view: group by partition key, view by GSI, color by entity type (sort key prefix or an attribute), facet views. |
+| Import / Export | Export a whole table to CSV, JSON, DynamoDB JSON or JSON lines. Import from CSV (headers may carry a type, e.g. `price (N)`) or JSON; batch writes with retry. Delete all items. |
+| Operation builder | GetItem, PutItem, UpdateItem (SET, REMOVE, ADD, DELETE, increment, list_append, if_not_exists), DeleteItem, Query, Scan, BatchGetItem, BatchWriteItem, TransactGetItems, TransactWriteItems, ExecuteStatement, BatchExecuteStatement, ExecuteTransaction. Condition expressions and ReturnValues; edit the request JSON directly. Generates **Python (boto3)**, **JavaScript (SDK v3)** and **AWS CLI** code. |
+| PartiQL editor | Run single statements, batches or transactions; NextToken pagination; history; export results. |
+| S3 browser | Buckets in the sidebar; create buckets (region, versioning) and delete them (optionally emptying objects and versions first). Browse objects like a file manager: breadcrumbs, type an `s3://bucket/prefix` path, sort, filter, paginate (Load more / Load all). Upload files and whole folders (button or drag and drop), multipart for large files, a Tasks queue with progress and cancel. Download (multiple files, whole folders), create folders and text files, copy / move / rename (recursive, across buckets), copy/cut/paste, delete (recursive). Detail panel: preview images, video, audio, PDF and text (edit and save text files), properties, edit metadata and storage class, tags, versions (download, restore, delete). Pre-signed URLs. Bucket properties: versioning, block public access, tags, policy, CORS, lifecycle. Context menu and keyboard shortcuts (Del, F2, Enter, Backspace, Ctrl+A/C/X/V). |
+| CloudWatch Logs | Log group list (filter, sort, favorites, retention, stored bytes). Log viewer: quick ranges (5m…1w, or type `45m`) or absolute time, local/UTC; CloudWatch filter patterns with clickable examples; filter by log stream; event histogram over time (click a bar to zoom); level coloring, quick ERROR/WARN/INFO/DEBUG filters, search within results, keyword highlighting; compact JSON log rendering (message + key=value) with an expandable JSON tree; surrounding lines for an event; live tail; export JSON/CSV/.log; shareable URLs that keep the filters. Logs Insights: multiple log groups, query templates (including Lambda), field suggestions, saved queries, history, cancel, bytes-scanned statistics, charts for `bin()` results. |
+| SQS | Queue list (available / in flight / delayed messages, DLQ, encryption), create Standard/FIFO queues (settings, encryption, DLQ, tags), purge, delete. Send messages (attributes, delay, group/dedup ID for FIFO, send N copies). Poll messages (count, wait time, visibility timeout; 0 = peek), view body/attributes, delete, return to queue, export JSON, copy into the send form. Edit settings, redrive policy, redrive allow policy, DLQ redrive (`StartMessageMoveTask`), access policy, tags. |
+| Lambda | Function list (runtime, memory, timeout, code size, architecture, filter by name/runtime, sort), account quotas. Create functions: author from scratch (Node.js / Python / Ruby / custom runtime templates), upload a .zip, from S3, container image; pick an existing role, enter an ARN or create a role with `AWSLambdaBasicExecutionRole`. **Code**: browse the package, edit in place, add / rename / delete files, deploy (Ctrl+S, keeps file modes, refuses to overwrite code changed by someone else), publish a version, upload .zip / S3, download .zip, change image. **Test**: sample events (API Gateway, SQS, S3, SNS, EventBridge, schedule, DynamoDB stream, Kinesis, ALB…), saved events, sync / async / dry-run invoke by version or alias, response, log tail, duration / billed / memory / cold start, session history. **Monitor**: Invocations, Errors, Throttles, Duration and Concurrency charts (CloudWatch), recent invocations from `REPORT` lines (p95, cold starts), links to the log viewer and Logs Insights. **Configuration**: memory, timeout, /tmp, runtime, handler, role, X-Ray, log format/level/log group, DLQ, KMS, SnapStart, layers (pick from the account or paste an ARN, reorder), VPC. Environment variables (show/hide, import/export .env, 4 KB limit and reserved-name checks). **Triggers**: SQS / Kinesis / DynamoDB stream / MSK event source mappings (batch, window, filter, partial batch failure, max concurrency, enable/disable), push triggers inferred from the resource policy. **Permissions**: execution role and attached policies (attach common managed policies), resource-based policy (add from API Gateway / S3 / SNS / EventBridge… presets, remove statements). **Versions & aliases**: publish, delete versions, aliases with weighted routing (canary). **Function URL**: create / edit / delete, IAM or public auth, CORS, response streaming. **Concurrency & async**: reserved concurrency, throttle, provisioned concurrency, retries / max event age / destinations. Tags. **Layers**: list, versions, functions using them, publish a new version from a .zip. |
+| Data modeler | Multiple models, each with multiple tables: keys, non-key attributes, GSIs, facets, sample data (form entry, CSV/JSON import). Import and export NoSQL Workbench model files (.json). Import a model from existing DynamoDB tables. Commit to DynamoDB (create tables and write sample data). Export CloudFormation. |
 
 ## S3 browser
 
-- Chuyển giữa **DynamoDB** và **S3** bằng nút gạt trên thanh trên cùng. Ở chế độ S3 chỉ còn giao diện S3 (bucket ở sidebar, màu xanh S3); trang Connections test kết nối bằng `ListBuckets`. Bucket chỉ được liệt kê ở chế độ S3.
-- Mọi thao tác đi qua server (proxy), nên dùng được cả endpoint chỉ truy cập được từ container. Upload được stream thẳng lên S3 (multipart với file lớn), không lưu tạm trên đĩa.
-- Mỗi bucket được gọi đúng region của nó (tự dò bằng `HeadBucket`), nên pre-signed URL và bucket ở region khác region đang chọn vẫn chạy.
-- **LocalStack / MinIO**: tạo custom endpoint, chọn credentials *Access keys* và điền ô *S3 endpoint URL* nếu S3 chạy ở cổng khác endpoint DynamoDB (ví dụ MinIO `http://host.docker.internal:9000`). Dùng path-style addressing.
-- Quyền IAM cần cho đầy đủ tính năng: `s3:ListAllMyBuckets`, `s3:ListBucket`, `s3:ListBucketVersions`, `s3:GetObject*`, `s3:PutObject*`, `s3:DeleteObject*`, `s3:GetBucket*`, `s3:PutBucket*`, `s3:CreateBucket`, `s3:DeleteBucket`. Thiếu quyền nào thì chỉ tính năng đó báo lỗi.
-- S3 không có rename / move thật: app copy sang key mới rồi xoá bản gốc. `CopyObject` không copy được object lớn hơn 5 GB.
-- Preview chạy trong sandbox (`Content-Security-Policy: sandbox`, `nosniff`); chỉ ảnh, video, audio, text thuần và PDF được hiển thị inline, còn lại (HTML, JS…) luôn bị ép tải xuống, nên nội dung trong bucket không chạy được script trên origin của app.
+- Switch between services with the toggle in the top bar. In S3 mode only the S3 UI is shown (buckets in the sidebar); the Connections page tests connections with `ListBuckets`. Buckets are only listed in S3 mode.
+- Every operation is proxied through the server, so endpoints only reachable from the container work too. Uploads are streamed straight to S3 (multipart for large files) without temporary files on disk.
+- Each bucket is called in its own region (detected with `HeadBucket`), so pre-signed URLs and buckets outside the selected region still work.
+- **LocalStack / MinIO**: create a custom endpoint, choose *Access keys* credentials and fill in *S3 endpoint URL* if S3 runs on a different port than the DynamoDB endpoint (e.g. MinIO `http://host.docker.internal:9000`). Path-style addressing is used.
+- IAM permissions for the full feature set: `s3:ListAllMyBuckets`, `s3:ListBucket`, `s3:ListBucketVersions`, `s3:GetObject*`, `s3:PutObject*`, `s3:DeleteObject*`, `s3:GetBucket*`, `s3:PutBucket*`, `s3:CreateBucket`, `s3:DeleteBucket`. A missing permission only breaks the feature that needs it.
+- S3 has no real rename / move: the app copies to the new key and deletes the original. `CopyObject` cannot copy objects larger than 5 GB.
+- Previews are sandboxed (`Content-Security-Policy: sandbox`, `nosniff`); only images, video, audio, plain text and PDF are shown inline. Everything else (HTML, JS…) is always forced to download, so bucket content can never run scripts on the app's origin.
 
 ## CloudWatch Logs
 
-- Chọn **CloudWatch** trên thanh trên cùng. Sidebar liệt kê log group (favorite ở đầu); gõ để lọc, nếu tài khoản có hơn 1000 group thì ô lọc tìm thêm trên server (phân biệt hoa thường).
-- **Log viewer** (`#/logs/group/<tên>`): gõ filter pattern rồi Enter. Pattern phân biệt hoa thường: `ERROR`, `"exact phrase"`, `?ERROR ?WARN` (một trong các từ), `ERROR -Timeout` (loại trừ), `{ $.level = "error" }` (JSON), `%regex%`. Phím `/` để focus ô tìm. Mỗi lần tìm lấy tối đa 1000 event (Load more để lấy tiếp, tối đa 20.000); thu hẹp khoảng thời gian nếu log nhiều.
-- **Live tail** poll `FilterLogEvents` mỗi 2,5 giây (không dùng `StartLiveTail` nên không tính phí theo phút), giữ 5000 dòng mới nhất.
-- **Logs Insights** tính phí theo GB dữ liệu scan; app cảnh báo khi khoảng thời gian dài hơn 7 ngày. Query đang chạy sẽ được dừng (`StopQuery`) khi rời trang.
-- **LocalStack**: tạo custom endpoint (mặc định `http://localhost:4566`). Nếu CloudWatch Logs chạy ở URL khác, điền ô *CloudWatch Logs endpoint URL*.
-- Quyền IAM: `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`, `logs:GetLogEvents`, `logs:GetLogGroupFields`, `logs:StartQuery`, `logs:GetQueryResults`, `logs:StopQuery`; thêm `logs:PutRetentionPolicy` và `logs:DeleteRetentionPolicy` nếu muốn đổi retention. App không xoá log group hay log stream.
+- Choose **CloudWatch** in the top bar. The sidebar lists log groups (favorites first); type to filter. With more than 1000 groups, the filter also searches on the server (case-sensitive).
+- **Log viewer** (`#/logs/group/<name>`): type a filter pattern and press Enter. Patterns are case-sensitive: `ERROR`, `"exact phrase"`, `?ERROR ?WARN` (any of), `ERROR -Timeout` (exclude), `{ $.level = "error" }` (JSON), `%regex%`. Press `/` to focus the search box. Each search fetches up to 1000 events (Load more for the next batch, up to 20,000); narrow the time range for busy logs.
+- **Live tail** polls `FilterLogEvents` every 2.5 seconds (not `StartLiveTail`, so there is no per-minute charge) and keeps the latest 5000 lines.
+- **Logs Insights** is billed per GB scanned; the app warns when the range exceeds 7 days. A running query is stopped (`StopQuery`) when you leave the page.
+- **LocalStack**: create a custom endpoint (default `http://localhost:4566`). If CloudWatch Logs runs at a different URL, fill in *CloudWatch Logs endpoint URL*.
+- IAM permissions: `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`, `logs:GetLogEvents`, `logs:GetLogGroupFields`, `logs:StartQuery`, `logs:GetQueryResults`, `logs:StopQuery`; plus `logs:PutRetentionPolicy` and `logs:DeleteRetentionPolicy` to change retention. The app never deletes log groups or log streams.
 
 ## SQS
 
-- Chọn **SQS** trên thanh trên cùng. Queue được gọi theo tên (`#/sqs/queue/<tên>`).
-- Poll message làm message bị ẩn trong visibility timeout và tăng receive count (có thể đẩy sang DLQ). Đặt visibility timeout 0 để chỉ xem.
-- **LocalStack / ElasticMQ**: tạo custom endpoint; nếu SQS chạy ở URL khác, điền ô *SQS endpoint URL* (ElasticMQ `http://localhost:9324`). Request luôn gửi tới endpoint, không theo host trong queue URL.
-- Quyền IAM: `sqs:ListQueues`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `sqs:SetQueueAttributes`, `sqs:CreateQueue`, `sqs:DeleteQueue`, `sqs:PurgeQueue`, `sqs:SendMessage`, `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:ListQueueTags`, `sqs:TagQueue`, `sqs:UntagQueue`, `sqs:ListDeadLetterSourceQueues`, `sqs:StartMessageMoveTask`, `sqs:ListMessageMoveTasks`, `sqs:CancelMessageMoveTask`.
+- Choose **SQS** in the top bar. Queues are addressed by name (`#/sqs/queue/<name>`).
+- Polling hides messages for the visibility timeout and increases their receive count (which can move them to a DLQ). Set the visibility timeout to 0 to only peek.
+- **LocalStack / ElasticMQ**: create a custom endpoint; if SQS runs at a different URL, fill in *SQS endpoint URL* (ElasticMQ `http://localhost:9324`). Requests always go to the endpoint, not to the host in the queue URL.
+- IAM permissions: `sqs:ListQueues`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `sqs:SetQueueAttributes`, `sqs:CreateQueue`, `sqs:DeleteQueue`, `sqs:PurgeQueue`, `sqs:SendMessage`, `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:ListQueueTags`, `sqs:TagQueue`, `sqs:UntagQueue`, `sqs:ListDeadLetterSourceQueues`, `sqs:StartMessageMoveTask`, `sqs:ListMessageMoveTasks`, `sqs:CancelMessageMoveTask`.
 
 ## Lambda
 
-- Chọn **Lambda** trên thanh trên cùng. Function được mở theo tên (`#/lambda/function/<tên>`); ô *Version* ở đầu trang chọn `$LATEST`, alias hoặc version cho tab Code (chỉ đọc), Test, Monitor, Function URL, Permissions và async config.
-- **Sửa code**: server tải package (`GetFunction` → `Code.Location`), giải nén và trả về file text (tối đa 1 MB mỗi file, 10 MB tổng); file binary hoặc lớn chỉ được liệt kê và vẫn giữ nguyên khi deploy. Khi deploy, server tải lại package hiện tại, áp các thay đổi, nén lại (giữ quyền thực thi, ví dụ `bootstrap`) rồi gọi `UpdateFunctionCode`. Nếu code đã bị người khác đổi kể từ lúc mở (`CodeSha256` khác), deploy bị từ chối. Package tối đa 50 MB (giới hạn upload trực tiếp); lớn hơn thì dùng S3. Function dạng container image chỉ đổi được image URI.
-- **Test event** được lưu trong trình duyệt (localStorage) theo từng function. Log tail chỉ có 4 KB cuối; bấm *Open in CloudWatch Logs* để xem đủ log của request đó.
-- **Monitor** dùng CloudWatch `GetMetricData` (namespace `AWS/Lambda`) và `FilterLogEvents` trên log group của function để đọc các dòng `REPORT`.
-- **Function URL** với auth `NONE` tự thêm 2 statement public vào resource policy (`lambda:InvokeFunctionUrl` và `lambda:InvokeFunction` qua URL), giống console; xoá URL thì gỡ 2 statement đó.
-- **LocalStack**: tạo custom endpoint (mặc định `http://localhost:4566`). Nếu Lambda chạy ở URL khác, điền ô *Lambda endpoint URL* (dùng cho cả IAM và CloudWatch metrics). Khi URL tải code trỏ tới host chỉ có trong mạng của emulator, server thử lại trên endpoint.
-- Quyền IAM: `lambda:List*`, `lambda:Get*`, `lambda:CreateFunction`, `lambda:DeleteFunction`, `lambda:UpdateFunctionCode`, `lambda:UpdateFunctionConfiguration`, `lambda:InvokeFunction`, `lambda:PublishVersion`, `lambda:CreateAlias`, `lambda:UpdateAlias`, `lambda:DeleteAlias`, `lambda:*EventSourceMapping`, `lambda:AddPermission`, `lambda:RemovePermission`, `lambda:*FunctionUrlConfig`, `lambda:PutFunctionConcurrency`, `lambda:DeleteFunctionConcurrency`, `lambda:*ProvisionedConcurrencyConfig`, `lambda:*FunctionEventInvokeConfig`, `lambda:TagResource`, `lambda:UntagResource`, `lambda:PublishLayerVersion`; `cloudwatch:GetMetricData`; `logs:FilterLogEvents`; `iam:ListRoles`, `iam:GetRole`, `iam:ListAttachedRolePolicies`, `iam:ListRolePolicies`, cộng `iam:CreateRole`, `iam:AttachRolePolicy` và `iam:PassRole` nếu muốn tạo role / gán role. Thiếu quyền nào thì chỉ tính năng đó báo lỗi. App không xoá layer version.
+- Choose **Lambda** in the top bar. Functions are opened by name (`#/lambda/function/<name>`); the *Version* selector at the top picks `$LATEST`, an alias or a version for the Code (read-only), Test, Monitor, Function URL, Permissions and async config tabs.
+- **Code editing**: the server downloads the package (`GetFunction` → `Code.Location`), unzips it and returns the text files (up to 1 MB each, 10 MB total); binary or large files are listed only and kept unchanged on deploy. On deploy the server downloads the current package again, applies your changes, re-zips it (keeping executable bits, e.g. `bootstrap`) and calls `UpdateFunctionCode`. If the code changed since you opened it (`CodeSha256` differs), the deploy is refused. Packages are limited to 50 MB (the direct upload limit); use S3 for larger ones. Container image functions can only change the image URI.
+- **Test events** are saved in the browser (localStorage) per function. The log tail only contains the last 4 KB; use *Open in CloudWatch Logs* for the full log of that request.
+- **Monitor** uses CloudWatch `GetMetricData` (namespace `AWS/Lambda`) and `FilterLogEvents` on the function's log group to read `REPORT` lines.
+- **Function URL** with `NONE` auth adds the two public statements to the resource policy (`lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` via the URL), like the AWS console; deleting the URL removes them.
+- **LocalStack**: create a custom endpoint (default `http://localhost:4566`). If Lambda runs at a different URL, fill in *Lambda endpoint URL* (also used for IAM and CloudWatch metrics). When the code download URL points to a host only reachable inside the emulator's network, the server retries through the endpoint.
+- IAM permissions: `lambda:List*`, `lambda:Get*`, `lambda:CreateFunction`, `lambda:DeleteFunction`, `lambda:UpdateFunctionCode`, `lambda:UpdateFunctionConfiguration`, `lambda:InvokeFunction`, `lambda:PublishVersion`, `lambda:CreateAlias`, `lambda:UpdateAlias`, `lambda:DeleteAlias`, `lambda:*EventSourceMapping`, `lambda:AddPermission`, `lambda:RemovePermission`, `lambda:*FunctionUrlConfig`, `lambda:PutFunctionConcurrency`, `lambda:DeleteFunctionConcurrency`, `lambda:*ProvisionedConcurrencyConfig`, `lambda:*FunctionEventInvokeConfig`, `lambda:TagResource`, `lambda:UntagResource`, `lambda:PublishLayerVersion`; `cloudwatch:GetMetricData`; `logs:FilterLogEvents`; `iam:ListRoles`, `iam:GetRole`, `iam:ListAttachedRolePolicies`, `iam:ListRolePolicies`, plus `iam:CreateRole`, `iam:AttachRolePolicy` and `iam:PassRole` to create or assign roles. A missing permission only breaks the feature that needs it. The app never deletes layer versions.
 
-## Biến môi trường
+## Environment variables
 
-| Biến | Mặc định | Ý nghĩa |
+| Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | Cổng HTTP |
-| `AWS_DIR` | `~/.aws` | Thư mục chứa `config` và `credentials` (cũng có thể đặt riêng `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`) |
-| `DATA_DIR` | `./data` (`/data` trong Docker) | Nơi lưu endpoint connection và data model |
-| `DEFAULT_ENDPOINTS` | | Danh sách `Tên=URL`, cách nhau bằng dấu phẩy; chỉ được tạo ở lần chạy đầu tiên |
-| `APP_USERNAME` / `APP_PASSWORD` | `admin` / (trống) | Đặt `APP_PASSWORD` để bật đăng nhập HTTP Basic Auth |
-| `ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Hostname được phép truy cập (chống DNS rebinding). `*` = cho phép tất cả |
+| `PORT` | `8080` | HTTP port |
+| `AWS_DIR` | `~/.aws` | Directory holding `config` and `credentials` (`AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` can also be set individually) |
+| `DATA_DIR` | `./data` (`/data` in Docker) | Where endpoint connections and data models are stored |
+| `DEFAULT_ENDPOINTS` | | Comma-separated `Name=URL` list; only created on first start |
+| `APP_USERNAME` / `APP_PASSWORD` | `admin` / (empty) | Set `APP_PASSWORD` to enable HTTP Basic Auth |
+| `ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Host names allowed to reach the app (DNS-rebinding protection). `*` allows all |
 
-## Bảo mật
+## Security
 
-Ai mở được app này thì có toàn quyền của các AWS credential mà nó đọc được.
+Anyone who can open this app has the full power of every AWS credential it can read.
 
-- Mặc định chỉ bind `127.0.0.1`. Nếu đưa lên server, hãy đặt `APP_PASSWORD`, thêm hostname vào `ALLOWED_HOSTS` và chạy sau HTTPS (reverse proxy).
-- Secret key không bao giờ gửi xuống trình duyệt. Muốn giữ secret cũ khi sửa profile thì để trống ô đó.
-- Mọi API thay đổi dữ liệu đều yêu cầu header `X-Requested-With` để chống CSRF.
-- Muốn profile chỉ đọc thì mount `~/.aws:/root/.aws:ro`.
+- By default it only binds to `127.0.0.1`. When deploying to a server, set `APP_PASSWORD`, add your host name to `ALLOWED_HOSTS` and put it behind HTTPS (reverse proxy).
+- Secret keys are never sent to the browser. Leave the field empty when editing a profile to keep the existing secret.
+- Every mutating API requires an `X-Requested-With` header (CSRF protection).
+- Mount `~/.aws:/root/.aws:ro` for read-only profiles.
 
-## Ghi chú
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
-- **SSO**: container không mở được trình duyệt để đăng nhập. Chạy `aws sso login --profile <tên>` trên máy host; container dùng lại token trong `~/.aws/sso/cache`.
-- **MFA** (`mfa_serial`) và `credential_process` trỏ tới binary không có trong container sẽ không chạy được. Nên dùng temporary credentials hoặc SSO.
-- **DynamoDB Local trên máy host**: dùng endpoint `http://host.docker.internal:8000`.
-- **Kiểu Number**: số được giữ nguyên dạng chuỗi (DynamoDB JSON) nên không mất độ chính xác. Chế độ plain JSON chuyển sang number của JS khi không bị mất độ chính xác.
+## Notes
 
-## Phát triển
+- **SSO**: the container cannot open a browser to sign in. Run `aws sso login --profile <name>` on the host; the container reuses the token in `~/.aws/sso/cache`.
+- **MFA** (`mfa_serial`) and `credential_process` pointing to a binary that is not in the container will not work. Use temporary credentials or SSO instead.
+- **DynamoDB Local on the host**: use the endpoint `http://host.docker.internal:8000`.
+- **Number type**: numbers are kept as strings (DynamoDB JSON), so no precision is lost. Plain JSON mode converts to JavaScript numbers only when that is lossless.
 
-```bash
-cd server && npm install && npm run dev      # API ở :8080
-cd web && npm install && npm run dev         # UI ở :5173 (proxy /api tới :8080)
-```
-
-Test (Vitest):
+## Development
 
 ```bash
-cd server && npm test                 # parser INI, profile, store, API, S3 routes (supertest + aws-sdk-client-mock)
-cd web && npm test                    # lib, component, page (Testing Library + jsdom, mock fetch)
-npm run test:coverage                 # chạy ở từng thư mục, báo cáo HTML nằm trong coverage/
+cd server && npm install && npm run dev      # API on :8080
+cd web && npm install && npm run dev         # UI on :5173 (proxies /api to :8080)
 ```
 
-Cấu trúc:
+Tests (Vitest):
+
+```bash
+cd server && npm test                 # INI parser, profiles, store, API, S3 routes (supertest + aws-sdk-client-mock)
+cd web && npm test                    # lib, components, pages (Testing Library + jsdom, mocked fetch)
+npm run test:coverage                 # in either directory; HTML report in coverage/
+```
+
+Project layout:
 
 ```
-server/src/app.js       Express: bảo mật, connection, proxy DynamoDB API, model
-server/src/lambda.js    Proxy Lambda / CloudWatch metrics / IAM role, invoke, đọc và sửa package .zip
-server/src/index.js     Khởi động server
-server/src/profiles.js  Đọc/ghi ~/.aws/config và credentials
-server/src/ini.js       Parser INI giữ nguyên comment
-web/src/lib/dynamo.js   Marshalling, expression builder, CloudFormation, sinh code, CSV
-web/src/pages/          Connections, TableView, ItemExplorer, OperationBuilder, PartiQL, Modeler
+server/src/app.js       Express: security, connections, DynamoDB API proxy, models
+server/src/s3.js        S3 proxy: buckets, objects, uploads, previews, pre-signed URLs
+server/src/logs.js      CloudWatch Logs proxy: search, live tail, Logs Insights
+server/src/sqs.js       SQS proxy
+server/src/lambda.js    Lambda / CloudWatch metrics / IAM role proxy, invoke, read and patch .zip packages
+server/src/index.js     Server entry point
+server/src/profiles.js  Read/write ~/.aws/config and credentials
+server/src/ini.js       Comment-preserving INI parser
+web/src/lib/dynamo.js   Marshalling, expression builder, CloudFormation, code generation, CSV
+web/src/pages/          Connections, TableView, ItemExplorer, OperationBuilder, PartiQL, Modeler, S3, Logs, SQS, Lambda
 web/src/components/     ItemEditor, QueryScanForm, Visualizer, ResultsGrid, TableDefEditor...
 ```
 
-## Publish lên Docker Hub
+## Publishing to Docker Hub
 
-Xem [docs/PUBLISH.md](docs/PUBLISH.md): lưu token trong Keychain, build multi-arch bằng Podman, push và cập nhật description.
+See [docs/PUBLISH.md](docs/PUBLISH.md): token stored in the Keychain, multi-arch build with Podman, push and description update.
 
-## Đóng góp
+## Contributing
 
-Xem [CONTRIBUTING.md](CONTRIBUTING.md). Báo lỗ hổng bảo mật: [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 [MIT](LICENSE) © Trung.Vu
-
----
-
-Developed by Trung.Vu

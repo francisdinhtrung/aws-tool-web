@@ -183,7 +183,7 @@ describe('<App>', () => {
     const links = await screen.findAllByRole('link', { name: /^(alpha|zeta)$/ });
     expect(links.map((l) => l.textContent)).toEqual(['alpha', 'zeta']); // sorted
     expect(screen.getByText('S3 Browser')).toBeInTheDocument();
-    expect(document.title).toBe('S3 Browser');
+    expect(document.title).toBe('S3 Browser · AWS Tool Web');
     expect(document.documentElement.dataset.workspace).toBe('s3');
     // No DynamoDB UI in the S3 workspace
     for (const t of ['Orders', 'Operation builder', 'PartiQL editor', 'Data modeler', 'DynamoDB Studio']) expect(screen.queryByText(new RegExp(t))).not.toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('<App>', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/logs'));
     go('#/logs');
     expect(await screen.findByRole('heading', { name: /Log groups/ })).toBeInTheDocument();
-    expect(document.title).toBe('CloudWatch Logs');
+    expect(document.title).toBe('CloudWatch Logs · AWS Tool Web');
     expect(document.documentElement.dataset.workspace).toBe('logs');
     await waitFor(() => expect(api.calls('POST /api/test').at(-1)).toEqual({ service: 'logs' }));
     expect(api.calls('POST /api/logs/op/DescribeLogGroups')).toHaveLength(2); // paged
@@ -255,7 +255,7 @@ describe('<App>', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/sqs'));
     go('#/sqs');
     expect(await screen.findByRole('heading', { name: /Queues/ })).toBeInTheDocument();
-    expect(document.title).toBe('SQS Console');
+    expect(document.title).toBe('SQS Console · AWS Tool Web');
     expect(document.documentElement.dataset.workspace).toBe('sqs');
     await waitFor(() => expect(api.calls('POST /api/test').at(-1)).toEqual({ service: 'sqs' }));
     expect(screen.getAllByText('pay.fifo').length).toBeGreaterThan(0);
@@ -288,7 +288,7 @@ describe('<App>', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/lambda'));
     go('#/lambda');
     expect(await screen.findByRole('heading', { name: /Functions/ })).toBeInTheDocument();
-    expect(document.title).toBe('Lambda Console');
+    expect(document.title).toBe('Lambda Console · AWS Tool Web');
     expect(document.documentElement.dataset.workspace).toBe('lambda');
     await waitFor(() => expect(api.calls('POST /api/test').at(-1)).toEqual({ service: 'lambda' }));
     expect(screen.getAllByText('resizer').length).toBeGreaterThan(0);

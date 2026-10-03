@@ -7,7 +7,7 @@ import { createApp, cleanEndpoint } from '../src/app.js';
 import { logsClientConfig, LOGS_COMMANDS } from '../src/logs.js';
 
 const logsMock = mockClient(CloudWatchLogsClient);
-const H = { 'x-requested-with': 'dynamodb-studio' };
+const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 const PROFILE = conn({ kind: 'profile', profile: 'default', region: 'eu-west-1' });
 

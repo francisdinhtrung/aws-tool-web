@@ -1,5 +1,5 @@
 {
-  "name": "dynamodb-studio-web",
+  "name": "aws-tool-web-web",
   "version": "1.1.0",
   "private": true,
   "type": "module",

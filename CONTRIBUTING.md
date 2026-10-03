@@ -1,36 +1,36 @@
-# Đóng góp
+# Contributing
 
-Cảm ơn bạn quan tâm tới dự án. Mọi issue và pull request đều được hoan nghênh.
+Thanks for your interest in the project. Issues and pull requests are welcome.
 
-## Môi trường phát triển
+## Development setup
 
-Yêu cầu: Node.js 22+, Docker (hoặc Podman) nếu muốn build image.
+Requirements: Node.js 22+, and Docker (or Podman) to build the image.
 
 ```bash
 # Backend (Express) – http://localhost:8080
 cd server && npm install && npm run dev
 
-# Frontend (Vite + React) – http://localhost:5173, proxy /api sang 8080
+# Frontend (Vite + React) – http://localhost:5173, proxies /api to 8080
 cd web && npm install && npm run dev
 ```
 
-Có thể chạy DynamoDB Local / LocalStack / MinIO để thử mà không cần tài khoản AWS thật.
+You can run DynamoDB Local / LocalStack / MinIO to try things without a real AWS account.
 
-## Quy trình
+## Workflow
 
-1. Fork repo, tạo branch từ `main`: `feat/...`, `fix/...`, `docs/...`.
-2. Viết test cho thay đổi (Vitest; server dùng `supertest` + `aws-sdk-client-mock`, web dùng Testing Library).
-3. Chạy test trước khi mở PR:
+1. Fork the repo and create a branch from `main`: `feat/...`, `fix/...`, `docs/...`.
+2. Add tests for your change (Vitest; the server uses `supertest` + `aws-sdk-client-mock`, the web app uses Testing Library).
+3. Run the tests before opening a PR:
 
    ```bash
    (cd server && npm test) && (cd web && npm test && npm run build)
    ```
 
-4. Commit theo [Conventional Commits](https://www.conventionalcommits.org/): `feat(s3): ...`, `fix(lambda): ...`, `docs: ...`.
-5. Mở pull request, điền checklist trong template. CI phải xanh.
+4. Use [Conventional Commits](https://www.conventionalcommits.org/): `feat(s3): ...`, `fix(lambda): ...`, `docs: ...`.
+5. Open a pull request and fill in the template checklist. CI must pass.
 
-## Quy ước
+## Guidelines
 
-- Không commit credential, file `data/`, hay `.env`.
-- Giữ giao diện nhất quán với các trang hiện có; tính năng mới nên ghi vào README và `DOCKERHUB.md`.
-- Lỗ hổng bảo mật: xem [SECURITY.md](SECURITY.md).
+- Never commit credentials, the `data/` directory or `.env` files.
+- Keep the UI consistent with existing pages; document new features in `README.md` and `DOCKERHUB.md`.
+- Security issues: see [SECURITY.md](SECURITY.md).

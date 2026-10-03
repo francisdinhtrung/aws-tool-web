@@ -15,7 +15,7 @@ export class ApiError extends Error {
 }
 
 export async function api(path, { method = 'GET', body, conn } = {}) {
-  const headers = { 'x-requested-with': 'dynamodb-studio' };
+  const headers = { 'x-requested-with': 'aws-tool-web' };
   const c = conn === undefined ? currentConn : conn;
   if (c) headers['x-conn'] = encodeURIComponent(JSON.stringify(c));
   if (body !== undefined) headers['content-type'] = 'application/json';

@@ -1,27 +1,27 @@
 name: Bug report
-description: Báo lỗi / Report a bug
+description: Report a bug
 labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: "**Không dán access key, secret key, session token hay dữ liệu nhạy cảm vào issue.**"
+      value: "**Never paste access keys, secret keys, session tokens or other sensitive data into an issue.**"
   - type: textarea
     id: what
     attributes:
-      label: Mô tả lỗi
-      description: Chuyện gì xảy ra, bạn mong đợi điều gì?
+      label: Description
+      description: What happened, and what did you expect?
     validations: { required: true }
   - type: textarea
     id: steps
     attributes:
-      label: Các bước tái hiện
-      placeholder: "1. Mở ...\n2. Bấm ...\n3. Thấy lỗi ..."
+      label: Steps to reproduce
+      placeholder: "1. Open ...\n2. Click ...\n3. See error ..."
     validations: { required: true }
   - type: dropdown
     id: area
     attributes:
-      label: Khu vực
-      options: [Connections, DynamoDB, S3, CloudWatch Logs, SQS, Lambda, Data modeler, Khác]
+      label: Area
+      options: [Connections, DynamoDB, S3, CloudWatch Logs, SQS, Lambda, Data modeler, Other]
     validations: { required: true }
   - type: input
     id: version
@@ -31,11 +31,11 @@ body:
   - type: input
     id: target
     attributes:
-      label: Môi trường AWS
-      placeholder: "AWS thật / LocalStack / DynamoDB Local / MinIO ..."
+      label: AWS environment
+      placeholder: "Real AWS / LocalStack / DynamoDB Local / MinIO ..."
   - type: textarea
     id: logs
     attributes:
-      label: Log / ảnh chụp
-      description: Log container (`docker logs aws-tool-web`) hoặc console trình duyệt.
+      label: Logs / screenshots
+      description: Container logs (`docker logs aws-tool-web`) or the browser console.
       render: text

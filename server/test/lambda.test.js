@@ -13,7 +13,7 @@ import { codeUrls, lambdaClientConfig, iamClientConfig, reviveLambdaInput, readZ
 const lambdaMock = mockClient(LambdaClient);
 const cwMock = mockClient(CloudWatchClient);
 const iamMock = mockClient(IAMClient);
-const H = { 'x-requested-with': 'dynamodb-studio' };
+const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 const PROFILE = conn({ kind: 'profile', profile: 'default', region: 'eu-west-1' });
 

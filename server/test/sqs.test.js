@@ -7,7 +7,7 @@ import { createApp, cleanEndpoint } from '../src/app.js';
 import { sqsClientConfig, reviveSqsInput, SQS_COMMANDS } from '../src/sqs.js';
 
 const sqsMock = mockClient(SQSClient);
-const H = { 'x-requested-with': 'dynamodb-studio' };
+const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 const PROFILE = conn({ kind: 'profile', profile: 'default', region: 'eu-west-1' });
 const Q = 'https://sqs.eu-west-1.amazonaws.com/123/orders';
