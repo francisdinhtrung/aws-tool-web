@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build the React frontend ----
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -9,13 +9,13 @@ COPY web/ ./
 RUN npm run build
 
 # ---- Install server production dependencies ----
-FROM node:22-alpine AS server-deps
+FROM node:26-alpine AS server-deps
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- Runtime ----
-FROM node:22-alpine
+FROM node:26-alpine
 ENV NODE_ENV=production \
     PORT=8080 \
     HOST=0.0.0.0 \
