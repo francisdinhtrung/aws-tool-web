@@ -29,6 +29,6 @@
     "@vitest/coverage-v8": "^5.0.3",
     "aws-sdk-client-mock": "^4.1.0",
     "supertest": "^7.3.0",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.4"
   }
 }
