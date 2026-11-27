@@ -127,14 +127,14 @@ function ProfileModal({ profile, profiles, onClose, onSaved }) {
   );
 }
 
-function EndpointModal({ endpoint, profiles, onClose, onSaved, s3, cwl, mq, fx }) {
+function EndpointModal({ endpoint, profiles, onClose, onSaved, s3, cwl, mq, fx, sm }) {
   const isNew = !endpoint;
   const [v, setV] = useState(
     () =>
       endpoint ||
       (s3
         ? { name: 'MinIO', endpoint: 'http://localhost:9000', region: 'us-east-1', authMode: 'keys' }
-        : cwl || mq || fx
+        : cwl || mq || fx || sm
           ? { name: 'LocalStack', endpoint: 'http://localhost:4566', region: 'us-east-1', authMode: 'local' }
           : { name: 'DynamoDB Local', endpoint: 'http://localhost:8000', region: 'us-east-1', authMode: 'local' }),
   );
@@ -192,6 +192,9 @@ function EndpointModal({ endpoint, profiles, onClose, onSaved, s3, cwl, mq, fx }
           <Field label="Step Functions endpoint URL (optional)" hint="Used by Step Functions when it runs on another URL, e.g. Step Functions Local http://localhost:8083. Empty = same as the endpoint above.">
             <input value={v.sfnEndpoint || ''} onChange={(e) => set({ sfnEndpoint: e.target.value })} placeholder="(same as endpoint URL)" />
           </Field>
+          <Field label="Secrets Manager endpoint URL (optional)" hint="Leave empty to use the main endpoint URL.">
+            <input value={v.secretsEndpoint || ''} onChange={(e) => set({ secretsEndpoint: e.target.value })} placeholder="(same as endpoint URL)" />
+          </Field>
         </>
       )}
       <div className="grid-2">
@@ -224,6 +227,7 @@ export default function Connections() {
   const mq = workspace === 'sqs';
   const fx = workspace === 'lambda';
   const sf = workspace === 'sfn';
+  const sm = workspace === 'secrets';
   const toast = useToast();
   const [info, setInfo] = useState(null);
   const [editing, setEditing] = useState(null); // {kind:'profile'|'endpoint', value}
@@ -238,7 +242,9 @@ export default function Connections() {
     try {
       const r = await api('/api/test', { method: 'POST', body: { service: workspace }, conn: c });
       const what =
-        r.stateMachineCount !== undefined
+        r.secretCount !== undefined
+          ? `${r.secretCount}${r.more ? '+' : ''} secrets in ${r.region}`
+          : r.stateMachineCount !== undefined
           ? `${r.stateMachineCount}${r.more ? '+' : ''} state machines in ${r.region}`
           : r.functionCount !== undefined
           ? `${r.functionCount}${r.more ? '+' : ''} functions in ${r.region}`
@@ -334,14 +340,14 @@ export default function Connections() {
           <h3>Custom endpoints</h3>
           <button className="btn btn-primary btn-sm" onClick={() => setEditing({ kind: 'endpoint', value: null })}>+ New endpoint</button>
         </div>
-        <div className="muted small">{s3 ? 'MinIO, LocalStack or any S3-compatible storage.' : cwl ? 'LocalStack or any CloudWatch Logs-compatible endpoint.' : mq ? 'LocalStack, ElasticMQ or any SQS-compatible endpoint.' : fx ? 'LocalStack or any Lambda-compatible endpoint.' : sf ? 'LocalStack, Step Functions Local or any Step Functions-compatible endpoint.' : 'DynamoDB Local, LocalStack or any DynamoDB-compatible endpoint.'}</div>
+        <div className="muted small">{s3 ? 'MinIO, LocalStack or any S3-compatible storage.' : cwl ? 'LocalStack or any CloudWatch Logs-compatible endpoint.' : mq ? 'LocalStack, ElasticMQ or any SQS-compatible endpoint.' : fx ? 'LocalStack or any Lambda-compatible endpoint.' : sf ? 'LocalStack, Step Functions Local or any Step Functions-compatible endpoint.' : sm ? 'LocalStack or any Secrets Manager-compatible endpoint.' : 'DynamoDB Local, LocalStack or any DynamoDB-compatible endpoint.'}</div>
         <table className="grid grid-plain">
           <thead><tr><th>Name</th><th>Endpoint</th><th>Region</th><th>Credentials</th><th>Test</th><th /></tr></thead>
           <tbody>
             {endpoints.map((e) => (
               <tr key={e.id}>
                 <td><strong>{e.name}</strong>{conn?.kind === 'endpoint' && conn.id === e.id && <span className="badge badge-ok">active</span>}</td>
-                <td><code>{s3 ? e.s3Endpoint || e.endpoint : cwl ? e.logsEndpoint || e.endpoint : mq ? e.sqsEndpoint || e.endpoint : fx ? e.lambdaEndpoint || e.endpoint : sf ? e.sfnEndpoint || e.endpoint : e.endpoint}</code></td>
+                <td><code>{s3 ? e.s3Endpoint || e.endpoint : cwl ? e.logsEndpoint || e.endpoint : mq ? e.sqsEndpoint || e.endpoint : fx ? e.lambdaEndpoint || e.endpoint : sf ? e.sfnEndpoint || e.endpoint : sm ? e.secretsEndpoint || e.endpoint : e.endpoint}</code></td>
                 <td>{e.region}</td>
                 <td>{e.authMode === 'profile' ? `profile ${e.profile}` : e.authMode === 'keys' ? 'access keys' : 'dummy'}</td>
                 <td><TestCell k={`e:${e.id}`} /></td>
@@ -381,6 +387,7 @@ export default function Connections() {
           cwl={cwl}
           mq={mq}
           fx={fx}
+          sm={sm}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);

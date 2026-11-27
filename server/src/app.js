@@ -13,6 +13,7 @@ import { logsRoutes } from './logs.js';
 import { sqsRoutes } from './sqs.js';
 import { lambdaRoutes } from './lambda.js';
 import { sfnRoutes } from './sfn.js';
+import { secretsRoutes } from './secrets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -129,6 +130,8 @@ export function cleanEndpoint(body, old = {}) {
   if (lambdaEndpoint && !/^https?:\/\/.+/i.test(lambdaEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'Lambda endpoint must be an http(s) URL');
   const sfnEndpoint = String(body.sfnEndpoint || '').trim();
   if (sfnEndpoint && !/^https?:\/\/.+/i.test(sfnEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'Step Functions endpoint must be an http(s) URL');
+  const secretsEndpoint = String(body.secretsEndpoint || '').trim();
+  if (secretsEndpoint && !/^https?:\/\/.+/i.test(secretsEndpoint)) throw new HttpError(400, 'InvalidEndpoint', 'Secrets Manager endpoint must be an http(s) URL');
   const authMode = ['local', 'keys', 'profile'].includes(body.authMode) ? body.authMode : 'local';
   return {
     name,
@@ -138,6 +141,7 @@ export function cleanEndpoint(body, old = {}) {
     sqsEndpoint,
     lambdaEndpoint,
     sfnEndpoint,
+    secretsEndpoint,
     region: String(body.region || 'us-east-1').trim(),
     authMode,
     profile: authMode === 'profile' ? String(body.profile || '') : '',
@@ -201,6 +205,11 @@ export function createApp(options = {}) {
     }
     next();
   });
+  app.use('/api/secrets', (_req, res, next) => {
+    res.locals.secretsRequest = true;
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
   app.use(express.json({ limit: '100mb' }));
 
   // --- Connections ------------------------------------------------------------
@@ -210,6 +219,7 @@ export function createApp(options = {}) {
   const sqs = sqsRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
   const lambda = lambdaRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput, fetchImpl: options.fetchImpl });
   const sfn = sfnRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
+  const secrets = secretsRoutes({ resolve: resolveConn, config: clientConfig, serialize: serializeOutput });
   const invalidateClients = () => {
     clients.clear();
     s3.clear();
@@ -217,6 +227,7 @@ export function createApp(options = {}) {
     sqs.clear();
     lambda.clear();
     sfn.clear();
+    secrets.clear();
   };
 
   async function getClient(req) {
@@ -318,6 +329,13 @@ export function createApp(options = {}) {
       out.more = Boolean(m.nextToken);
       return res.json(out);
     }
+    if (req.body?.service === 'secrets') {
+      const list = await secrets.listSecrets(c.r);
+      out.endpoint = c.r.secretsEndpoint || out.endpoint;
+      out.secretCount = (list.SecretList || []).length;
+      out.more = Boolean(list.NextToken);
+      return res.json(out);
+    }
     if (req.body?.service === 's3') {
       out.bucketCount = ((await s3.listBuckets(c.r)).Buckets || []).length;
       return res.json(out);
@@ -354,6 +372,7 @@ export function createApp(options = {}) {
   api.use('/sqs', sqs.router);
   api.use('/lambda', lambda.router);
   api.use('/sfn', sfn.router);
+  api.use('/secrets', secrets.router);
 
   api.get('/models', async (req, res) => res.json(await listModels()));
   api.get('/models/:id', async (req, res) => res.json(await getModel(req.params.id)));
@@ -385,11 +404,12 @@ export function createApp(options = {}) {
   app.use((err, req, res, next) => {
     let status = err.status || err.statusCode || err.$metadata?.httpStatusCode || 500;
     if (status < 400 || status > 599) status = 500;
-    if (status >= 500 && process.env.NODE_ENV !== 'test') console.error(err);
+    const { secretsRequest } = res.locals;
+    if (status >= 500 && !secretsRequest && process.env.NODE_ENV !== 'test') console.error(err);
     res.status(status).json({
       error: err.name || 'Error',
-      message: err.message || String(err),
-      cancellationReasons: err.CancellationReasons,
+      message: secretsRequest && !(err instanceof HttpError) ? 'Secrets Manager request failed.' : err.message || String(err),
+      cancellationReasons: secretsRequest ? undefined : err.CancellationReasons,
     });
   });
 

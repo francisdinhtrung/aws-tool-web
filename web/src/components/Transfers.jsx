@@ -34,7 +34,11 @@ export function TransfersProvider({ children }) {
       const job = queue.current.shift();
       running.current++;
       patch(job.id, { status: 'running', started: Date.now() });
-      const { promise, abort } = uploadBlob(job.bucket, job.key, job.file, (loaded) => patch(job.id, { loaded }), job.conn);
+      const { promise, abort } = uploadBlob(job.bucket, job.key, job.file, {
+        onProgress: (loaded) => patch(job.id, { loaded }),
+        conn: job.conn,
+        createOnly: job.createOnly,
+      });
       aborts.current.set(job.id, abort);
       promise
         .then(() => finish(job.id, (t) => ({ status: 'done', loaded: t.total, ended: Date.now() })))
@@ -48,10 +52,10 @@ export function TransfersProvider({ children }) {
 
   // files: [{ file: Blob, key }]
   const upload = useCallback(
-    (bucket, files) => {
-      const conn = getConn(); // pin the connection: switching it later must not redirect queued uploads
+    (bucket, files, { conn = getConn(), createOnly = false } = {}) => {
+      // Pin the connection so switching it later cannot redirect queued uploads.
       const fresh = files.map(({ file, key }) => ({
-        id: `t${++seq}`, kind: 'upload', label: key, bucket, key, file, conn, total: file.size, loaded: 0, status: 'queued',
+        id: `t${++seq}`, kind: 'upload', label: `s3://${bucket}/${key}`, bucket, key, file, conn, createOnly, total: file.size, loaded: 0, status: 'queued',
       }));
       setTasks((ts) => [...ts, ...fresh.map(({ file, conn: _c, ...t }) => t)]);
       fresh.forEach((t) => aborts.current.set(t.id, () => {

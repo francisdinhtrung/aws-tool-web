@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import App from './App.jsx';
 import Home from './pages/Home.jsx';
 import { mockBackend, renderWithApp, awsError, SHOP_DESC } from './test/utils.jsx';
@@ -210,6 +210,169 @@ describe('<App>', () => {
     expect(screen.getByText('Select a connection to list buckets.')).toBeInTheDocument();
     expect(screen.queryByText(/NoSQL Workbench/)).not.toBeInTheDocument();
   });
+
+  it('opens Secrets Manager, paginates metadata, and retrieves only the selected version on demand', async () => {
+    const arn = 'arn:aws:secretsmanager:us-west-2:123456789012:secret:apps/config+prod-a1b2c3';
+    const secret = { ARN: arn, Name: 'apps/config+prod', VersionIdsToStages: { v1: ['AWSPREVIOUS'], v2: ['AWSCURRENT'] } };
+    const api = backend({
+      'POST /api/secrets/op/ListSecrets': ({ NextToken }) => NextToken ? { SecretList: [secret] } : { SecretList: [{ Name: 'another' }], NextToken: 'page-2' },
+      'POST /api/secrets/op/DescribeSecret': secret,
+      'POST /api/secrets/op/GetSecretValue': ({ VersionStage }) => VersionStage === 'AWSPREVIOUS' ? { SecretBinary: 'AQID' } : { SecretString: 'current-placeholder' },
+    });
+    localStorage.setItem('ddbs.conn', JSON.stringify({ kind: 'profile', profile: 'default', region: 'us-west-2' }));
+    render(<App />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Secrets Manager' }));
+    go('#/secrets');
+    await screen.findByRole('link', { name: 'another' });
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    fireEvent.click(await screen.findByRole('link', { name: secret.Name }));
+    await screen.findByRole('heading', { name: secret.Name });
+    expect(api.calls('POST /api/test').at(-1)).toEqual({ service: 'secrets' });
+    expect(api.calls('POST /api/secrets/op/ListSecrets').at(-1)).toMatchObject({ IncludePlannedDeletion: true, NextToken: 'page-2' });
+    expect(api.calls('POST /api/secrets/op/DescribeSecret')).toEqual([{ SecretId: arn }]);
+    expect(api.calls('POST /api/secrets/op/GetSecretValue')).toEqual([]);
+
+    fireEvent.change(screen.getByLabelText('Version stage'), { target: { value: 'AWSPREVIOUS' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Retrieve value' }));
+    expect(await screen.findByText('AQID')).toBeInTheDocument();
+    expect(screen.getByText('Binary value shown as Base64.')).toBeInTheDocument();
+    expect(api.calls('POST /api/secrets/op/GetSecretValue')).toEqual([{ SecretId: arn, VersionStage: 'AWSPREVIOUS' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide value' }));
+    expect(screen.queryByText('AQID')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Version stage'), { target: { value: 'AWSCURRENT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Retrieve value' }));
+    expect(await screen.findByText('current-placeholder')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-1' } });
+    expect(screen.queryByText('current-placeholder')).not.toBeInTheDocument();
+    expect(api.calls('POST /api/secrets/op/GetSecretValue')).toHaveLength(2);
+    expect(window.location.hash).not.toContain('current-placeholder');
+  });
+
+  it('manages a secret through creation, value updates, scheduled deletion and restore', async () => {
+    const arn = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:app/demo-a1b2c3';
+    let secret;
+    const api = backend({
+      'POST /api/secrets/op/ListSecrets': { SecretList: [] },
+      'POST /api/secrets/op/CreateSecret': (input) => {
+        secret = { ARN: arn, Name: input.Name, Description: input.Description };
+        return { ARN: arn, Name: secret.Name };
+      },
+      'POST /api/secrets/op/DescribeSecret': () => secret,
+      'POST /api/secrets/op/UpdateSecret': (input) => {
+        secret.Description = input.Description;
+        return { ARN: arn, Name: secret.Name, VersionId: 'new-version' };
+      },
+      'POST /api/secrets/op/DeleteSecret': { ARN: arn, DeletionDate: '2026-02-01T00:00:00.000Z' },
+      'POST /api/secrets/op/RestoreSecret': { ARN: arn },
+    });
+    localStorage.setItem('ddbs.conn', JSON.stringify({ kind: 'endpoint', id: 'e1' }));
+    go('#/secrets');
+    render(<App />);
+    await screen.findByText('No secrets in this region.');
+    fireEvent.click(screen.getByRole('button', { name: 'Create secret' }));
+    const create = within(screen.getByRole('dialog', { name: 'Create secret' }));
+    fireEvent.change(create.getByRole('textbox', { name: /^Name/ }), { target: { value: 'app/demo' } });
+    fireEvent.change(create.getByLabelText('Description'), { target: { value: 'Original description' } });
+    fireEvent.change(create.getByLabelText('Secret value'), { target: { value: ' original value ' } });
+    fireEvent.click(create.getByRole('button', { name: 'Create secret' }));
+    await screen.findByRole('heading', { name: 'app/demo' });
+    expect(api.calls('POST /api/secrets/op/CreateSecret')).toEqual([{ Name: 'app/demo', Description: 'Original description', SecretString: ' original value ' }]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit secret' }));
+    const edit = within(screen.getByRole('dialog', { name: 'Edit secret' }));
+    const value = edit.getByRole('textbox', { name: /^New secret value/ });
+    expect(value).toHaveValue('');
+    fireEvent.change(value, { target: { value: '{"key":"new"}' } });
+    fireEvent.change(edit.getByLabelText('Description'), { target: { value: 'Updated description' } });
+    fireEvent.click(edit.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Schedule deletion' })).toBeEnabled());
+    expect(api.calls('POST /api/secrets/op/UpdateSecret')).toEqual([{ SecretId: arn, Description: 'Updated description', SecretString: '{"key":"new"}' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule deletion' }));
+    const deletion = within(screen.getByRole('dialog', { name: 'Schedule deletion' }));
+    expect(api.calls('POST /api/secrets/op/DeleteSecret')).toEqual([]);
+    fireEvent.change(deletion.getByRole('spinbutton'), { target: { value: '7' } });
+    fireEvent.click(deletion.getByRole('button', { name: 'Schedule deletion' }));
+    expect(await screen.findByRole('button', { name: 'Restore secret' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retrieve value' })).not.toBeInTheDocument();
+    expect(api.calls('POST /api/secrets/op/DeleteSecret')).toEqual([{ SecretId: arn, RecoveryWindowInDays: 7 }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore secret' }));
+    expect(await screen.findByRole('button', { name: 'Retrieve value' })).toBeInTheDocument();
+    expect(api.calls('POST /api/secrets/op/RestoreSecret')).toEqual([{ SecretId: arn }]);
+    expect(api.calls('POST /api/secrets/op/GetSecretValue')).toEqual([]);
+  });
+
+  it('opens and downloads an exact S3 URI from the bucket list without listing the folder', async () => {
+    const key = '/inbox//résumé #?+%2F.png';
+    const api = backend({
+      'POST /api/s3/op/HeadObject': ({ Key }) => {
+        if (Key !== key) throw awsError('NotFound', 'object missing', 404);
+        return { ContentType: 'image/png', ContentLength: 10 };
+      },
+    });
+    localStorage.setItem('ddbs.conn', JSON.stringify({ kind: 'endpoint', id: 'e1' }));
+    go('#/s3');
+    render(<App />);
+
+    const open = (uri) => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open S3 path' }));
+      const dialog = screen.getByRole('dialog', { name: 'Open S3 path' });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: /^S3 path/ }), { target: { value: uri } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Open' }));
+    };
+
+    open(`s3://private-bucket/${key}`);
+    expect(await screen.findByRole('img', { name: 'résumé #?+%2F.png' })).toBeInTheDocument();
+    expect(api.calls('POST /api/s3/op/HeadObject')).toEqual([{ Bucket: 'private-bucket', Key: key }]);
+    expect(api.calls('POST /api/s3/op/ListObjectsV2')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: '⬇ Download' }));
+    const download = HTMLAnchorElement.prototype.click.mock.instances.at(-1);
+    expect(new URL(download.href).searchParams.get('key')).toBe(key);
+    expect(new URL(download.href).searchParams.get('bucket')).toBe('private-bucket');
+
+    open('s3://private-bucket/missing');
+    expect(await screen.findByText('Object not found.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '⬇ Download' })).not.toBeInTheDocument();
+
+    open('s3://private-bucket//inbox//');
+    await waitFor(() => expect(api.calls('POST /api/s3/op/ListObjectsV2')).toEqual([
+      expect.objectContaining({ Bucket: 'private-bucket', Prefix: '/inbox//', Delimiter: '/' }),
+    ]));
+  });
+
+  it('searches nested S3 files across pages and opens a matching object', async () => {
+    const key = 'reports/2026/January REPORT.png';
+    const api = backend({
+      'POST /api/s3/op/ListObjectsV2': (body) => {
+        if (body.Delimiter) return { CommonPrefixes: [{ Prefix: 'reports/2026/' }] };
+        if (!body.ContinuationToken) return {
+          Contents: [{ Key: 'reports/January/' }, { Key: 'reports/February.png' }],
+          IsTruncated: true,
+          NextContinuationToken: 'second',
+        };
+        return { Contents: [{ Key: key, Size: 12 }] };
+      },
+      'POST /api/s3/op/HeadObject': { ContentType: 'image/png', ContentLength: 12 },
+    });
+    localStorage.setItem('ddbs.conn', JSON.stringify({ kind: 'endpoint', id: 'e1' }));
+    go('#/s3/alpha/reports/');
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search files' }));
+    const search = within(screen.getByRole('dialog', { name: 'Search files' }));
+    fireEvent.change(search.getByRole('searchbox'), { target: { value: 'JANUARY' } });
+    fireEvent.click(search.getByRole('button', { name: 'Search' }));
+    const link = await search.findByRole('link', { name: '2026/January REPORT.png' });
+    expect(search.getAllByRole('link')).toEqual([link]);
+    const pages = api.calls('POST /api/s3/op/ListObjectsV2').filter((body) => !body.Delimiter);
+    expect(pages).toEqual([
+      { Bucket: 'alpha', Prefix: 'reports/', MaxKeys: 1000 },
+      { Bucket: 'alpha', Prefix: 'reports/', MaxKeys: 1000, ContinuationToken: 'second' },
+    ]);
+    fireEvent.click(link);
+    expect(await screen.findByRole('img', { name: 'January REPORT.png' })).toBeInTheDocument();
+    expect(api.calls('POST /api/s3/op/HeadObject')).toEqual([{ Bucket: 'alpha', Key: key }]);
+  });
+
   it('the CloudWatch workspace lists log groups, favorites and opens the viewer', async () => {
     const api = backend({
       'POST /api/logs/op/DescribeLogGroups': (b) =>

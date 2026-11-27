@@ -294,11 +294,11 @@ export default function S3Details({ bucket, item, onClose, onChanged, actions })
     setError(null);
     s3('HeadObject', { Bucket: bucket, Key: item.key })
       .then(setHead)
-      .catch((e) => setError(errorText(e)));
+      .catch((e) => setError(e.status === 404 ? 'Object not found.' : errorText(e)));
   }, [bucket, item.key, tick]);
   const changed = () => {
     setTick((t) => t + 1);
-    onChanged();
+    onChanged?.();
   };
   return (
     <aside className="s3-details card">
@@ -306,7 +306,7 @@ export default function S3Details({ bucket, item, onClose, onChanged, actions })
         <h3 className="ellipsis" title={item.key}>{item.name}</h3>
         <button className="icon-btn" onClick={onClose} aria-label="Close details">×</button>
       </div>
-      <div className="row-gap wrap mb">{actions}</div>
+      <div className="row-gap wrap mb">{actions?.(head)}</div>
       <Tabs small tabs={[['preview', 'Preview'], ['props', 'Properties'], ['tags', 'Tags'], ['versions', 'Versions']]} value={tab} onChange={setTab} />
       <ErrorBox error={error} />
       {!head && !error && <Spinner />}

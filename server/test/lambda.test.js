@@ -47,7 +47,7 @@ describe('lambda helpers', () => {
     expect(lambdaClientConfig(base, { kind: 'profile' })).toEqual({ region: 'r' });
     expect(lambdaClientConfig(base, { kind: 'endpoint', endpoint: 'http://x' }).endpoint).toBe('http://x');
     expect(lambdaClientConfig(base, { kind: 'endpoint', endpoint: 'http://x', lambdaEndpoint: 'http://l' }).endpoint).toBe('http://l');
-    expect(iamClientConfig(base, { kind: 'profile' }).region).toBe('us-east-1');
+    expect(iamClientConfig({ ...base, region: 'cn-north-1' }, { kind: 'profile' })).toEqual({ region: 'cn-north-1' });
   });
 
   it('revives base64 zip files', () => {

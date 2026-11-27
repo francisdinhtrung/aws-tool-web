@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { errorText } from '../api.js';
-import { useApp } from '../context.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { errorText, getConn } from '../api.js';
+import { navigate, useApp } from '../context.js';
 import { Modal, Field, Select, Spinner, ErrorBox, Tabs, JsonArea, useToast, copyText } from './ui.jsx';
+import { useTransfers } from './Transfers.jsx';
 import { REGIONS } from '../lib/dynamo.js';
-import { s3, presign, deletePrefix, BUCKET_NAME_RE, baseName, parentPrefix } from '../lib/s3.js';
+import { s3, presign, listSigningRoles, deletePrefix, BUCKET_NAME_RE, baseName, parentPrefix, parseS3Uri, s3ObjectPath, s3Path, fmtDate } from '../lib/s3.js';
 
 // S3 "not configured" errors mean "empty" for the property editors.
 const EMPTY_ERRORS = new Set([
@@ -44,6 +45,116 @@ function useAction(onDone) {
     }
   };
   return { busy, error, setError, run };
+}
+
+export function S3PathModal({ initialPath = '', onClose }) {
+  const [uri, setUri] = useState(initialPath);
+  const path = parseS3Uri(uri);
+  const canOpenFile = path?.key && !path.key.endsWith('/');
+  const open = (asFolder = false) => {
+    if (!path) return;
+    const { bucket, key } = path;
+    const target = canOpenFile && !asFolder ? s3ObjectPath(bucket, key) : s3Path(bucket, key);
+    navigate(target);
+    onClose();
+  };
+  return (
+    <Modal
+      title="Open S3 path"
+      onClose={onClose}
+      footer={(
+        <>
+          {canOpenFile && <button className="btn" onClick={() => open(true)}>Browse as folder</button>}
+          <FooterButtons onClose={onClose} onOk={() => open()} label="Open" disabled={!path} />
+        </>
+      )}
+    >
+      <Field label="S3 path" hint="Use a trailing slash to browse a folder.">
+        <input autoFocus className="mono" placeholder="s3://bucket/path/to/file" value={uri} onChange={(e) => setUri(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && open()} />
+      </Field>
+    </Modal>
+  );
+}
+
+export function UploadToPathModal({ initialPath = '', onClose }) {
+  const { upload } = useTransfers();
+  const [file, setFile] = useState(null);
+  const [uri, setUri] = useState(initialPath);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState(null);
+  const [overwrite, setOverwrite] = useState(null);
+  const check = useRef(null);
+  const path = parseS3Uri(uri);
+  const isFolder = path && (!path.key || path.key.endsWith('/'));
+  const key = isFolder && file ? `${path.key}${file.name}` : path?.key;
+  const canUpload = Boolean(file && key);
+
+  useEffect(() => () => { check.current = null; }, []);
+
+  const close = () => {
+    if (overwrite) {
+      setOverwrite(null);
+      return;
+    }
+    check.current = null;
+    onClose();
+  };
+  const enqueue = ({ bucket, key, file, conn }, createOnly) => {
+    upload(bucket, [{ file, key }], { conn, createOnly });
+    onClose();
+  };
+  const submit = async () => {
+    if (!canUpload || check.current || overwrite) return;
+    const target = { bucket: path.bucket, key, file, conn: getConn() };
+    check.current = target;
+    setChecking(true);
+    setError(null);
+    try {
+      const exists = await s3('HeadObject', { Bucket: target.bucket, Key: target.key }).then(
+        () => true,
+        (e) => {
+          if (e.status === 404 && ['NotFound', 'NoSuchKey'].includes(e.name)) return false;
+          throw e;
+        },
+      );
+      if (check.current !== target) return;
+      if (exists) setOverwrite(target);
+      else enqueue(target, true);
+    } catch (e) {
+      if (check.current === target) setError(`Could not check the destination. ${errorText(e)}`);
+    } finally {
+      if (check.current === target) {
+        check.current = null;
+        setChecking(false);
+      }
+    }
+  };
+
+  const footer = overwrite ? (
+    <>
+      <button className="btn" autoFocus onClick={close}>Cancel</button>
+      <button className="btn btn-danger" onClick={() => enqueue(overwrite, false)}>Overwrite</button>
+    </>
+  ) : (
+    <FooterButtons onClose={close} onOk={submit} label={checking ? 'Checking destination…' : 'Upload'} disabled={!canUpload || checking} />
+  );
+  return (
+    <Modal title={overwrite ? 'Overwrite existing file?' : 'Upload file to S3 path'} onClose={close} footer={footer}>
+      {overwrite && (
+        <p>Replace the current contents of <code className="pre-wrap">{`s3://${overwrite.bucket}/${overwrite.key}`}</code>?</p>
+      )}
+      <div hidden={Boolean(overwrite)}>
+        <Field label="File">
+          <input autoFocus type="file" disabled={checking} onChange={(e) => setFile(e.target.files[0] || null)} />
+        </Field>
+        <Field label="Destination S3 path" hint="End the path with / to keep the original file name.">
+          <input className="mono" placeholder="s3://bucket/path/to/file" value={uri} disabled={checking} onChange={(e) => setUri(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        </Field>
+        {canUpload && !overwrite && <code className="pre-wrap small">{`s3://${path.bucket}/${key}`}</code>}
+        <ErrorBox error={error} />
+      </div>
+    </Modal>
+  );
 }
 
 // --- Buckets ----------------------------------------------------------------------
@@ -425,31 +536,117 @@ export function DeleteModal({ items, onClose, onConfirm }) {
 }
 
 const EXPIRES = [[900, '15 minutes'], [3600, '1 hour'], [21600, '6 hours'], [86400, '1 day'], [259200, '3 days'], [604800, '7 days (max)']];
+const ROLE_EXPIRES = EXPIRES.filter(([seconds]) => seconds <= 3600);
 
-export function ShareModal({ bucket, item, versionId, onClose }) {
+export function ShareModal({ bucket, item, versionId, initialPath = '', onClose }) {
   const { conn } = useApp();
   const toast = useToast();
+  const [uri, setUri] = useState(initialPath);
+  const [signingMode, setSigningMode] = useState('connection');
+  const [roleList, setRoleList] = useState(null);
+  const [roleArn, setRoleArn] = useState('');
+  const [externalId, setExternalId] = useState('');
   const [expires, setExpires] = useState(3600);
-  const [url, setUrl] = useState('');
-  const { busy, error, run } = useAction();
-  const gen = () => run(async () => setUrl((await presign(bucket, item.key, expires, versionId)).url));
-  const s3uri = `s3://${bucket}/${item.key}`;
+  const [result, setResult] = useState(null);
+  const { busy, error, setError, run } = useAction();
+  const target = item ? { bucket, key: item.key } : parseS3Uri(uri);
+  const canAssumeRole = conn && conn.kind !== 'endpoint';
+  const assumeRole = canAssumeRole && signingMode === 'role';
+  const requestedExpiry = assumeRole ? Math.min(expires, 3600) : expires;
+  const canGenerate = Boolean(target?.key && (item || !target.key.endsWith('/')) && (!assumeRole || roleArn.trim()));
+  const s3uri = item ? `s3://${bucket}/${item.key}` : '';
+  const roles = roleList?.conn === conn ? roleList : null;
+  const selectedRole = roles?.options.some(([arn]) => arn === roleArn.trim()) ? roleArn.trim() : '';
+
+  useEffect(() => {
+    if (!assumeRole) return;
+    const controller = new AbortController();
+    setRoleList(null);
+    listSigningRoles(conn, controller.signal).then(
+      (options) => { if (!controller.signal.aborted) setRoleList({ conn, options }); },
+      (e) => { if (!controller.signal.aborted) setRoleList({ conn, options: [], error: errorText(e) }); },
+    );
+    return () => controller.abort();
+  }, [assumeRole, conn]);
+
+  const resetResult = () => {
+    setResult(null);
+    setError(null);
+  };
+  const changeRole = (value) => {
+    setRoleArn(value);
+    resetResult();
+  };
+  const gen = () => {
+    if (busy || !canGenerate) return;
+    setResult(null);
+    run(async () => setResult(await presign(target.bucket, target.key, requestedExpiry, versionId, {
+      conn,
+      roleArn: assumeRole ? roleArn.trim() : undefined,
+      externalId: assumeRole ? externalId.trim() || undefined : undefined,
+    })));
+  };
+  const copy = async (text) => {
+    const copied = await copyText(text).catch(() => false);
+    if (copied) toast('Copied');
+    else toast('Could not copy. Select the text to copy it manually.', 'error');
+  };
   return (
-    <Modal title={`Share ${baseName(item.key)}`} onClose={onClose} size="lg">
+    <Modal title={item ? `Share ${baseName(item.key)}` : 'Create pre-signed URL'} onClose={onClose} size="lg">
       <ErrorBox error={error} />
-      <Field label="S3 URI">
-        <div className="input-group"><input readOnly value={s3uri} /><button className="btn" onClick={() => copyText(s3uri).then(() => toast('Copied'))}>Copy</button></div>
-      </Field>
+      {item ? (
+        <Field label="S3 URI">
+          <div className="input-group"><input readOnly value={s3uri} /><button className="btn" aria-label="Copy S3 URI" onClick={() => copy(s3uri)}>Copy</button></div>
+        </Field>
+      ) : (
+        <Field label="S3 URI" hint="Enter the full path to a file, including its name.">
+          <input
+            autoFocus className="mono" placeholder="s3://bucket/path/to/file" value={uri} disabled={busy} spellCheck={false}
+            onChange={(e) => { setUri(e.target.value); resetResult(); }}
+            onKeyDown={(e) => e.key === 'Enter' && gen()}
+          />
+        </Field>
+      )}
+      {canAssumeRole && (
+        <Field label="Signing credentials">
+          <Select value={signingMode} onChange={(v) => { setSigningMode(v); resetResult(); }} options={[
+            ['connection', 'Current connection'], ['role', 'Assume IAM role'],
+          ]} disabled={busy} />
+        </Field>
+      )}
+      {assumeRole && (
+        <>
+          <Field label="IAM role" hint="Roles in the selected profile's AWS account.">
+            <Select value={selectedRole} onChange={changeRole} disabled={busy || !roles?.options.length} options={[
+              ['', !roles ? 'Loading roles…' : roles.error ? 'Role list unavailable' : roles.options.length ? 'Choose a role' : 'No roles found'],
+              ...(roles?.options || []),
+            ]} />
+          </Field>
+          {roles?.error && <div className="text-bad small mb" role="status">Could not list IAM roles. {roles.error}</div>}
+          <div className="grid-2">
+            <Field label="IAM role ARN" hint="Paste an ARN for a role outside the list.">
+              <input className="mono" placeholder="arn:aws:iam::123456789012:role/S3Download" value={roleArn} maxLength={2048} disabled={busy} spellCheck={false}
+                onChange={(e) => changeRole(e.target.value)} />
+            </Field>
+            <Field label="External ID (optional)">
+              <input value={externalId} maxLength={1224} disabled={busy} spellCheck={false} onChange={(e) => { setExternalId(e.target.value); resetResult(); }} />
+            </Field>
+          </div>
+        </>
+      )}
       <h5>Pre-signed URL</h5>
-      <div className="row-gap mb">
-        <Select value={expires} onChange={(v) => setExpires(Number(v))} options={EXPIRES} aria-label="Expires in" />
-        <button className="btn btn-primary" onClick={gen} disabled={busy}>{busy ? <Spinner /> : 'Generate'}</button>
+      <div className="row-gap wrap mb">
+        <Select value={requestedExpiry} onChange={(v) => { setExpires(Number(v)); resetResult(); }} options={assumeRole ? ROLE_EXPIRES : EXPIRES} aria-label="Expires in" disabled={busy} />
+        <button className="btn btn-primary" onClick={gen} disabled={busy || !canGenerate}>{busy ? <Spinner /> : 'Generate'}</button>
       </div>
-      {url && (
-        <div className="input-group">
-          <input readOnly value={url} onFocus={(e) => e.target.select()} />
-          <button className="btn" onClick={() => copyText(url).then(() => toast('Copied'))}>Copy</button>
-        </div>
+      {result?.url && (
+        <>
+          <div className="input-group">
+            <input readOnly aria-label="Pre-signed URL" value={result.url} onFocus={(e) => e.target.select()} />
+            <button className="btn" aria-label="Copy URL" onClick={() => copy(result.url)}>Copy</button>
+          </div>
+          {result.expiresAt && <div className="muted small mt">Expires at {fmtDate(result.expiresAt)}</div>}
+        </>
       )}
       <div className="muted small mt">
         Anyone with the link can download the object until it expires. Links signed with temporary (SSO / assume-role) credentials stop working when those credentials expire.

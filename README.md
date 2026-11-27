@@ -13,6 +13,7 @@ A self-hosted web console for everyday AWS work, running in a single Docker cont
 - **SQS** – queue manager (send, poll, DLQ redrive)
 - **Lambda** – function console (inline code editor, test events, metrics, configuration, triggers, versions and aliases, function URLs)
 - **Step Functions** – workflow console (definition editor with a live graph, executions with a state-by-state view, single-state testing, versions and aliases)
+- **Secrets Manager** – browse secrets, retrieve versioned values on demand, create and update secrets, and schedule deletion or restore
 - **AWS profile manager** – edit `~/.aws/config` and `~/.aws/credentials` from the UI
 
 Works with real AWS accounts as well as DynamoDB Local, LocalStack, MinIO, ElasticMQ and Step Functions Local.
@@ -43,12 +44,12 @@ Open http://localhost:8080
 
 ### Windows portable (no Docker, no install)
 
-Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com/francisdinhtrung/aws-tool-web/releases), extract it anywhere (a USB drive works too) and double-click `AWS Tool Web.cmd`. Node.js is bundled, so nothing has to be installed.
+Double-click `aws-tool-web-<version>-win-x64.exe` on 64-bit Windows. The launcher unpacks its bundled runtime into a temporary folder and opens the app in your default browser.
 
-- The app listens on `127.0.0.1:8080` and opens in the default browser; close the console window to stop it.
-- Profiles are read from and written to `%USERPROFILE%\.aws`; connections and data models live in the `data` folder next to the launcher.
-- Change settings by setting [environment variables](#environment-variables) before starting, e.g. `set PORT=9090`.
-- Build the zip yourself (macOS, Linux or Git Bash): `./scripts/build-windows-portable.sh` writes it to `release/`.
+- The app listens on `127.0.0.1:8080` by default. Close the console window to stop it. Set `PORT` before starting to use a different port.
+- AWS profiles live in `%USERPROFILE%\.aws`. Connections and data models are stored in the `data` folder next to the executable, or in `DATA_DIR` if supplied.
+- Build the EXE with `./scripts/build-windows-portable.sh --exe` using Node.js and Go 1.23 or later. The result is written to `release/`.
+- The ZIP edition remains available from [Releases](https://github.com/francisdinhtrung/aws-tool-web/releases). Extract it and run `AWS Tool Web.cmd`. Build it locally with `./scripts/build-windows-portable.sh`.
 
 ## Features
 
@@ -72,7 +73,11 @@ Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com
 
 ## S3 browser
 
-- Switch between services with the toggle in the top bar. In S3 mode only the S3 UI is shown (buckets in the sidebar); the Connections page tests connections with `ListBuckets`. Buckets are only listed in S3 mode.
+- Switch between services with the service navigation. The S3 sidebar lists buckets, and the Connections page tests connections with `ListBuckets`.
+- **Search files** matches names and relative paths in the current folder and its subfolders, ignoring case. Start at the bucket root to search the entire bucket. Use **Open S3 path** to paste an `s3://bucket/path/to/file` URI and preview or download the object. A trailing slash opens a folder.
+- **Upload to S3 path** is available from the bucket list and the **Upload** menu. Choose one local file and enter `s3://bucket/path/to/file` to set its destination, or end the path with `/` to keep the original file name. Confirm **Overwrite** if the destination already exists. Track the upload in **Tasks**.
+- Use **Create pre-signed URL** to paste any file's S3 URI, choose an expiry and copy its download link. **Share** fills in the URI for a selected file.
+- To sign with an IAM role, select an AWS SSO/profile connection or the default credential chain. Use **Current connection** when it already uses the required role. Choose **Assume IAM role** to select a role from the current account (`iam:ListRoles`) or paste its ARN. Enter an external ID if the role requires one. AWS enforces `sts:AssumeRole` and the role's trust policy. The signing role needs `s3:GetObject` for the file, and the signing session caps the link lifetime. [AWS pre-signed URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)
 - Every operation is proxied through the server, so endpoints only reachable from the container work too. Uploads are streamed straight to S3 (multipart for large files) without temporary files on disk.
 - Each bucket is called in its own region (detected with `HeadBucket`), so pre-signed URLs and buckets outside the selected region still work.
 - **LocalStack / MinIO**: create a custom endpoint, choose *Access keys* credentials and fill in *S3 endpoint URL* if S3 runs on a different port than the DynamoDB endpoint (e.g. MinIO `http://host.docker.internal:9000`). Path-style addressing is used.
@@ -82,7 +87,7 @@ Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com
 
 ## CloudWatch Logs
 
-- Choose **CloudWatch** in the top bar. The sidebar lists log groups (favorites first); type to filter. With more than 1000 groups, the filter also searches on the server (case-sensitive).
+- Choose **CloudWatch** from the service navigation. The sidebar lists log groups (favorites first); type to filter. With more than 1000 groups, the filter also searches on the server (case-sensitive).
 - **Log viewer** (`#/logs/group/<name>`): type a filter pattern and press Enter. Patterns are case-sensitive: `ERROR`, `"exact phrase"`, `?ERROR ?WARN` (any of), `ERROR -Timeout` (exclude), `{ $.level = "error" }` (JSON), `%regex%`. Press `/` to focus the search box. Each search fetches up to 1000 events (Load more for the next batch, up to 20,000); narrow the time range for busy logs.
 - **Live tail** polls `FilterLogEvents` every 2.5 seconds (not `StartLiveTail`, so there is no per-minute charge) and keeps the latest 5000 lines.
 - **Logs Insights** is billed per GB scanned; the app warns when the range exceeds 7 days. A running query is stopped (`StopQuery`) when you leave the page.
@@ -91,14 +96,14 @@ Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com
 
 ## SQS
 
-- Choose **SQS** in the top bar. Queues are addressed by name (`#/sqs/queue/<name>`).
+- Choose **SQS** from the service navigation. Queues are addressed by name (`#/sqs/queue/<name>`).
 - Polling hides messages for the visibility timeout and increases their receive count (which can move them to a DLQ). Set the visibility timeout to 0 to only peek.
 - **LocalStack / ElasticMQ**: create a custom endpoint; if SQS runs at a different URL, fill in *SQS endpoint URL* (ElasticMQ `http://localhost:9324`). Requests always go to the endpoint, not to the host in the queue URL.
 - IAM permissions: `sqs:ListQueues`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `sqs:SetQueueAttributes`, `sqs:CreateQueue`, `sqs:DeleteQueue`, `sqs:PurgeQueue`, `sqs:SendMessage`, `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:ListQueueTags`, `sqs:TagQueue`, `sqs:UntagQueue`, `sqs:ListDeadLetterSourceQueues`, `sqs:StartMessageMoveTask`, `sqs:ListMessageMoveTasks`, `sqs:CancelMessageMoveTask`.
 
 ## Lambda
 
-- Choose **Lambda** in the top bar. Functions are opened by name (`#/lambda/function/<name>`); the *Version* selector at the top picks `$LATEST`, an alias or a version for the Code (read-only), Test, Monitor, Function URL, Permissions and async config tabs.
+- Choose **Lambda** from the service navigation. Functions are opened by name (`#/lambda/function/<name>`); the *Version* selector at the top picks `$LATEST`, an alias or a version for the Code (read-only), Test, Monitor, Function URL, Permissions and async config tabs.
 - **Code editing**: the server downloads the package (`GetFunction` → `Code.Location`), unzips it and returns the text files (up to 1 MB each, 10 MB total); binary or large files are listed only and kept unchanged on deploy. On deploy the server downloads the current package again, applies your changes, re-zips it (keeping executable bits, e.g. `bootstrap`) and calls `UpdateFunctionCode`. If the code changed since you opened it (`CodeSha256` differs), the deploy is refused. Packages are limited to 50 MB (the direct upload limit); use S3 for larger ones. Container image functions can only change the image URI.
 - **Test events** are saved in the browser (localStorage) per function. The log tail only contains the last 4 KB; use *Open in CloudWatch Logs* for the full log of that request.
 - **Monitor** uses CloudWatch `GetMetricData` (namespace `AWS/Lambda`) and `FilterLogEvents` on the function's log group to read `REPORT` lines.
@@ -108,13 +113,20 @@ Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com
 
 ## Step Functions
 
-- Choose **Step Functions** in the top bar. State machines are opened by name (`#/sfn/machine/<name>`), executions by ARN (`#/sfn/execution/<arn>`).
+- Choose **Step Functions** from the service navigation. State machines are opened by name (`#/sfn/machine/<name>`), executions by ARN (`#/sfn/execution/<arn>`).
 - The execution view reads the whole history (`GetExecutionHistory`, up to 25,000 events) and uses the definition the execution actually ran (`DescribeStateMachineForExecution`), so the graph stays right after the definition changes. Running executions refresh every 3 seconds.
 - **Express** state machines have no execution history in Step Functions: the Executions tab links to the log group of the logging configuration instead. Synchronous runs (`StartSyncExecution`) show the output, error and billed duration right away.
 - **Test state** calls `TestState` with the state's JSON (editable, the saved definition is not changed) and the role you choose; the role needs the permissions of the services the state calls.
 - Recent execution inputs are kept in the browser (localStorage), per state machine.
 - **LocalStack / Step Functions Local**: create a custom endpoint; if Step Functions runs at a different URL, fill in *Step Functions endpoint URL* (Step Functions Local `http://localhost:8083`). The `sync-` host prefix of `StartSyncExecution` / `TestState` is disabled for custom endpoints.
 - IAM permissions: `states:List*`, `states:Describe*`, `states:GetExecutionHistory`, `states:CreateStateMachine`, `states:UpdateStateMachine`, `states:DeleteStateMachine`, `states:ValidateStateMachineDefinition`, `states:StartExecution`, `states:StartSyncExecution`, `states:StopExecution`, `states:RedriveExecution`, `states:TestState`, `states:PublishStateMachineVersion`, `states:DeleteStateMachineVersion`, `states:*StateMachineAlias`, `states:CreateActivity`, `states:DeleteActivity`, `states:TagResource`, `states:UntagResource`; `iam:ListRoles` to pick a role, plus `iam:CreateRole`, `iam:AttachRolePolicy` and `iam:PassRole` to create or assign one. A missing permission only breaks the feature that needs it.
+
+## Secrets Manager
+
+- Choose **Secrets Manager** from the service navigation, then select the connection and region. Pick a secret from the list or use **Open secret** with its name or full ARN.
+- Select a version stage and click **Retrieve value**. Text and JSON are shown as stored, and binary values are shown as Base64. **Hide value** clears the display. Retrieved values stay in memory for the current view, and API responses use `Cache-Control: no-store`.
+- Use **Create secret** or **Edit secret** to set a description and a text, JSON, or Base64 value. Saving a new value creates a version. **Schedule deletion** uses a 7–30 day recovery window. **Restore secret** cancels deletion during that window.
+- For **LocalStack**, use the main endpoint or fill in **Secrets Manager endpoint URL** in Connections for a separate URL. The matching IAM actions are `secretsmanager:ListSecrets`, `secretsmanager:DescribeSecret`, `secretsmanager:GetSecretValue`, `secretsmanager:CreateSecret`, `secretsmanager:UpdateSecret`, `secretsmanager:DeleteSecret`, and `secretsmanager:RestoreSecret`. Retrieval using a customer-managed KMS key also requires `kms:Decrypt`. [AWS GetSecretValue permissions](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html)
 
 ## Environment variables
 
@@ -132,7 +144,7 @@ Download `aws-tool-web-<version>-win-x64.zip` from [Releases](https://github.com
 Anyone who can open this app has the full power of every AWS credential it can read.
 
 - By default it only binds to `127.0.0.1`. When deploying to a server, set `APP_PASSWORD`, add your host name to `ALLOWED_HOSTS` and put it behind HTTPS (reverse proxy).
-- Secret keys are never sent to the browser. Leave the field empty when editing a profile to keep the existing secret.
+- Saved AWS access key secrets are omitted from connection and profile responses. Leave the field empty when editing a profile to keep the existing secret.
 - Every mutating API requires an `X-Requested-With` header (CSRF protection).
 - Mount `~/.aws:/root/.aws:ro` for read-only profiles.
 

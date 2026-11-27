@@ -35,12 +35,8 @@ export function lambdaClientConfig(base, r) {
   return cfg;
 }
 
-// IAM is global: the regional endpoint is irrelevant, but emulators serve it on the Lambda endpoint.
-export function iamClientConfig(base, r) {
-  const cfg = lambdaClientConfig(base, r);
-  if (r.kind !== 'endpoint') cfg.region = 'us-east-1';
-  return cfg;
-}
+// The SDK uses the selected region to resolve the global IAM endpoint for its AWS partition.
+export const iamClientConfig = lambdaClientConfig;
 
 /** Deployment packages travel as base64 strings in JSON. */
 export function reviveLambdaInput(op, input = {}) {

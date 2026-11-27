@@ -4,20 +4,48 @@ import { useApp, navigate } from '../context.js';
 import { Spinner, ErrorBox, Empty, useToast, copyText } from '../components/ui.jsx';
 import { useTransfers } from '../components/Transfers.jsx';
 import S3Details from '../components/S3Details.jsx';
+import S3Search from '../components/S3Search.jsx';
 import {
-  CreateBucketModal, DeleteBucketModal, BucketPropsModal, NewFolderModal, NewFileModal, TransferModal, DeleteModal, ShareModal,
+  CreateBucketModal, DeleteBucketModal, BucketPropsModal, NewFolderModal, NewFileModal, TransferModal, DeleteModal, ShareModal, S3PathModal, UploadToPathModal,
 } from '../components/S3Modals.jsx';
 import {
-  s3, listPage, parseS3Route, s3Path, parentPrefix, fmtBytes, fmtDate, fileIcon, typeLabel, copySource, expandSelection,
+  s3, listPage, parseS3Route, s3Path, baseName, parentPrefix, fmtBytes, fmtDate, fileIcon, typeLabel, copySource, expandSelection,
   deleteKeys, deletePrefix, downloadObject, pool, filesFromDrop, uploadBlob,
 } from '../lib/s3.js';
 
-export default function S3Browser({ arg = '' }) {
+export default function S3Browser({ arg = '', objectKey }) {
   const { conn } = useApp();
   const { bucket, prefix } = parseS3Route(arg);
   if (!conn) return <S3Welcome />;
   if (!bucket) return <BucketList />;
+  if (objectKey) return <ObjectPage key={JSON.stringify([bucket, objectKey])} bucket={bucket} objectKey={objectKey} />;
   return <ObjectBrowser key={bucket} bucket={bucket} prefix={prefix} />;
+}
+
+function ObjectPage({ bucket, objectKey }) {
+  const [modal, setModal] = useState(null);
+  const uri = `s3://${bucket}/${objectKey}`;
+  const browseFolder = () => navigate(s3Path(bucket, parentPrefix(objectKey)));
+  return (
+    <div className="page s3-page">
+      <div className="page-head">
+        <h2 className="ellipsis" title={uri}>{uri}</h2>
+        <div className="push-right row-gap wrap">
+          <button className="btn" onClick={browseFolder}>Browse folder</button>
+          <button className="btn" onClick={() => setModal('path')}>Open S3 path</button>
+          <button className="btn" onClick={() => setModal('presign')}>Create pre-signed URL</button>
+        </div>
+      </div>
+      <S3Details
+        bucket={bucket}
+        item={{ key: objectKey, name: baseName(objectKey) || objectKey }}
+        onClose={browseFolder}
+        actions={(head) => head && <button className="btn btn-xs" onClick={() => downloadObject(bucket, objectKey)}>⬇ Download</button>}
+      />
+      {modal === 'path' && <S3PathModal initialPath={uri} onClose={() => setModal(null)} />}
+      {modal === 'presign' && <ShareModal initialPath={uri} onClose={() => setModal(null)} />}
+    </div>
+  );
 }
 
 function S3Welcome() {
@@ -51,8 +79,11 @@ function BucketList() {
       <div className="page-head">
         <h2>🪣 Buckets <span className="muted count">({filter ? `${shown.length} of ${buckets.length}` : buckets.length})</span></h2>
         <span className="muted ellipsis">{info.label}{info.endpoint ? ` · ${info.endpoint}` : ''}</span>
-        <div className="push-right row-gap">
+        <div className="push-right row-gap wrap">
           <input placeholder="Filter buckets…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <button className="btn" onClick={() => setModal({ type: 'path' })}>Open S3 path</button>
+          <button className="btn" onClick={() => setModal({ type: 'upload-path' })}>Upload to S3 path</button>
+          <button className="btn" onClick={() => setModal({ type: 'presign' })}>Create pre-signed URL</button>
           <button className="btn" onClick={reloadBuckets}>↻ Refresh</button>
           <button className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>＋ Create bucket</button>
         </div>
@@ -87,6 +118,9 @@ function BucketList() {
           </table>
         </div>
       )}
+      {modal?.type === 'path' && <S3PathModal onClose={() => setModal(null)} />}
+      {modal?.type === 'upload-path' && <UploadToPathModal onClose={() => setModal(null)} />}
+      {modal?.type === 'presign' && <ShareModal onClose={() => setModal(null)} />}
       {modal?.type === 'create' && (
         <CreateBucketModal
           onClose={() => setModal(null)}
@@ -132,48 +166,11 @@ function sortItems(items, { by, dir }) {
   });
 }
 
-function PathBar({ bucket, prefix }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState('');
-  const parts = prefix.split('/').filter(Boolean);
-  const go = () => {
-    const t = text.trim().replace(/^s3:\/\//, '').replace(/^\/+/, '');
-    const i = t.indexOf('/');
-    const b = i < 0 ? t : t.slice(0, i);
-    let p = i < 0 ? '' : t.slice(i + 1);
-    if (p && !p.endsWith('/')) p += '/';
-    setEditing(false);
-    if (b) navigate(s3Path(b, p));
-  };
-  if (editing) {
-    return (
-      <div className="pathbar">
-        <span className="muted">s3://</span>
-        <input
-          autoFocus
-          className="path-input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') go();
-            if (e.key === 'Escape') setEditing(false);
-          }}
-        />
-      </div>
-    );
-  }
+function PathBar({ bucket, prefix, onEdit }) {
+  const parts = prefix ? prefix.slice(0, -1).split('/') : [];
+  const uri = `s3://${bucket}/${prefix}`;
   return (
-    <div
-      className="pathbar"
-      title="Click empty space to type a path"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          setText(`${bucket}/${prefix}`);
-          setEditing(true);
-        }
-      }}
-    >
+    <div className="pathbar" title="Click empty space to type a path" onClick={(e) => e.target === e.currentTarget && onEdit()}>
       <button className="icon-btn" title="Up one level (Backspace)" disabled={!prefix} onClick={() => navigate(s3Path(bucket, parentPrefix(prefix)))}>⬑</button>
       <a href="#/s3" className="crumb muted">S3</a>
       <span className="sep">/</span>
@@ -181,10 +178,11 @@ function PathBar({ bucket, prefix }) {
       {parts.map((p, i) => (
         <React.Fragment key={i}>
           <span className="sep">/</span>
-          <a href={`#${s3Path(bucket, `${parts.slice(0, i + 1).join('/')}/`)}`} className="crumb">{p}</a>
+          {p && <a href={`#${encodeURI(s3Path(bucket, `${parts.slice(0, i + 1).join('/')}/`))}`} className="crumb">{p}</a>}
         </React.Fragment>
       ))}
-      <button className="icon-btn path-copy" title="Copy S3 URI" onClick={() => copyText(`s3://${bucket}/${prefix}`)}>⧉</button>
+      <button className="btn btn-xs push-right" onClick={onEdit}>Open S3 path</button>
+      <button className="icon-btn" title="Copy S3 URI" onClick={() => copyText(uri)}>⧉</button>
     </div>
   );
 }
@@ -453,7 +451,7 @@ function ObjectBrowser({ bucket, prefix }) {
   const totalSize = items.reduce((s, i) => s + (i.size || 0), 0);
   const selSize = selFiles.reduce((s, i) => s + (i.size || 0), 0);
 
-  const detailActions = detail && (
+  const detailActions = () => (
     <>
       <button className="btn btn-xs" onClick={() => download([detail])}>⬇ Download</button>
       <button className="btn btn-xs" onClick={() => setModal({ type: 'share', item: detail })}>🔗 Share</button>
@@ -464,44 +462,58 @@ function ObjectBrowser({ bucket, prefix }) {
 
   return (
     <div className="page s3-page" onKeyDown={onKey}>
-      <div className="page-head">
-        <h2 className="ellipsis">🪣 {bucket}</h2>
-        <div className="push-right row-gap">
+      <div className="resource-heading">
+        <div className="resource-title">
+          <span className="feature-icon" aria-hidden="true">▱</span>
+          <h2>{bucket}</h2>
+        </div>
+        <div className="resource-actions row-gap wrap">
           <button className="btn btn-sm" onClick={() => setModal({ type: 'bucket-props' })}>⚙ Bucket properties</button>
           <button className="btn btn-sm btn-danger" onClick={() => setModal({ type: 'bucket-delete' })}>Delete bucket</button>
         </div>
       </div>
 
       <div className="s3-toolbar">
-        <div className="dropdown">
-          <button className="btn btn-primary" onClick={() => setUploadMenu(!uploadMenu)} onBlur={() => setTimeout(() => setUploadMenu(false), 150)}>⬆ Upload ▾</button>
-          {uploadMenu && (
-            <div className="dropdown-menu">
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setUploadMenu(false); fileInput.current.click(); }}>📄 Files…</button>
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setUploadMenu(false); folderInput.current.click(); }}>📁 Folder…</button>
+        <div className="s3-toolbar-row">
+          <div className="row-gap wrap">
+            <div className="dropdown" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setUploadMenu(false); }}>
+              <button className="btn btn-primary" aria-expanded={uploadMenu} onClick={() => setUploadMenu(!uploadMenu)}>⬆ Upload ▾</button>
+              {uploadMenu && (
+                <div className="dropdown-menu">
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setUploadMenu(false); fileInput.current.click(); }}>📄 Files…</button>
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setUploadMenu(false); folderInput.current.click(); }}>📁 Folder…</button>
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setUploadMenu(false); setModal({ type: 'upload-path' }); }}>Upload to S3 path</button>
+                </div>
+              )}
             </div>
-          )}
+            <input ref={fileInput} type="file" multiple hidden data-testid="file-input" onChange={(e) => { startUpload([...e.target.files].map((file) => ({ file, path: file.name }))); e.target.value = ''; }} />
+            <input ref={folderInput} type="file" multiple hidden onChange={(e) => { startUpload([...e.target.files].map((file) => ({ file, path: file.webkitRelativePath || file.name }))); e.target.value = ''; }} />
+            <button className="btn" onClick={() => setModal({ type: 'folder' })}>＋ Folder</button>
+            <button className="btn" onClick={() => setModal({ type: 'file' })}>＋ Text file</button>
+            <button className="btn" onClick={() => setModal({ type: 'presign' })}>Create pre-signed URL</button>
+            {clip && <button className="btn" onClick={paste} title={`Paste ${clip.items.length} item(s) from s3://${clip.bucket}/${clip.prefix}`}>📋 Paste ({clip.items.length})</button>}
+          </div>
+          <div className="tb-right">
+            <input className="s3-filter" aria-label="Filter this folder" placeholder="Filter this folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <button className="btn" onClick={() => setModal({ type: 'search' })}>Search files</button>
+            <button className="btn" title="Refresh" aria-label="Refresh" onClick={() => load()}>↻</button>
+            <button className={`btn${showDetails ? ' active' : ''}`} title="Toggle details panel" aria-label="Toggle details panel" aria-pressed={showDetails} onClick={() => setShowDetails(!showDetails)}>◨</button>
+          </div>
         </div>
-        <input ref={fileInput} type="file" multiple hidden data-testid="file-input" onChange={(e) => { startUpload([...e.target.files].map((file) => ({ file, path: file.name }))); e.target.value = ''; }} />
-        <input ref={folderInput} type="file" multiple hidden onChange={(e) => { startUpload([...e.target.files].map((file) => ({ file, path: file.webkitRelativePath || file.name }))); e.target.value = ''; }} />
-        <button className="btn" onClick={() => setModal({ type: 'folder' })}>＋ Folder</button>
-        <button className="btn" onClick={() => setModal({ type: 'file' })}>＋ Text file</button>
-        <span className="tb-sep" />
-        <button className="btn" disabled={!sel.length} onClick={() => download()}>⬇ Download</button>
-        <button className="btn" disabled={!sel.length} onClick={() => setModal({ type: 'copy', items: sel })}>⧉ Copy to…</button>
-        <button className="btn" disabled={!sel.length} onClick={() => setModal({ type: 'move', items: sel })}>➜ Move to…</button>
-        <button className="btn" disabled={!single} onClick={() => setModal({ type: 'rename', items: [single] })}>✎ Rename</button>
-        <button className="btn" disabled={!single || single.type !== 'file'} onClick={() => setModal({ type: 'share', item: single })}>🔗 Share</button>
-        <button className="btn btn-danger" disabled={!sel.length} onClick={() => setModal({ type: 'delete', items: sel })}>🗑 Delete</button>
-        {clip && <button className="btn" onClick={paste} title={`Paste ${clip.items.length} item(s) from s3://${clip.bucket}/${clip.prefix}`}>📋 Paste ({clip.items.length})</button>}
-        <span className="push-right tb-right">
-          <input className="s3-filter" placeholder="Filter this folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <button className="btn" title="Refresh" onClick={() => load()}>↻</button>
-          <button className={`btn${showDetails ? ' active' : ''}`} title="Toggle details panel" onClick={() => setShowDetails(!showDetails)}>◨</button>
-        </span>
+        {sel.length > 0 && (
+          <div className="s3-selection-bar row-gap wrap" role="group" aria-label="Selected object actions">
+            <span className="s3-selection-count" role="status">{sel.length} selected{selFiles.length ? ` (${fmtBytes(selSize)})` : ''}</span>
+            <button className="btn" onClick={() => download()}>⬇ Download</button>
+            <button className="btn" onClick={() => setModal({ type: 'copy', items: sel })}>⧉ Copy to…</button>
+            <button className="btn" onClick={() => setModal({ type: 'move', items: sel })}>➜ Move to…</button>
+            <button className="btn" disabled={!single} onClick={() => setModal({ type: 'rename', items: [single] })}>✎ Rename</button>
+            <button className="btn" disabled={!single || single.type !== 'file'} onClick={() => setModal({ type: 'share', item: single })}>🔗 Share</button>
+            <button className="btn btn-danger" onClick={() => setModal({ type: 'delete', items: sel })}>🗑 Delete</button>
+          </div>
+        )}
       </div>
 
-      <PathBar bucket={bucket} prefix={prefix} />
+      <PathBar bucket={bucket} prefix={prefix} onEdit={() => setModal({ type: 'path' })} />
       <ErrorBox error={error} onClose={() => setError(null)} />
 
       <div className={`s3-layout${detail ? ' with-details' : ''}`}>
@@ -542,7 +554,7 @@ function ObjectBrowser({ bucket, prefix }) {
                 {prefix && (
                   <tr className="up-row" onDoubleClick={() => navigate(s3Path(bucket, parentPrefix(prefix)))}>
                     <td />
-                    <td colSpan={COLS.length}><a href={`#${s3Path(bucket, parentPrefix(prefix))}`}>⬑ ..</a></td>
+                    <td colSpan={COLS.length}><a href={`#${encodeURI(s3Path(bucket, parentPrefix(prefix)))}`}>⬑ ..</a></td>
                   </tr>
                 )}
                 {shown.map((it, idx) => (
@@ -566,7 +578,7 @@ function ObjectBrowser({ bucket, prefix }) {
                     <td className="name-col" title={it.key}>
                       <span className="f-icon">{fileIcon(it)}</span>
                       {it.type === 'folder' ? (
-                        <a href={`#${s3Path(bucket, it.key)}`} onClick={(e) => e.stopPropagation()}>{it.name}/</a>
+                        <a href={`#${encodeURI(s3Path(bucket, it.key))}`} onClick={(e) => e.stopPropagation()}>{it.name}/</a>
                       ) : (
                         it.name
                       )}
@@ -590,7 +602,6 @@ function ObjectBrowser({ bucket, prefix }) {
           <div className="s3-status">
             {loading ? <Spinner /> : null}
             <span>{folders} folder{folders === 1 ? '' : 's'}, {files} file{files === 1 ? '' : 's'} · {fmtBytes(totalSize)}{next ? ' (more not loaded)' : ''}</span>
-            {sel.length > 0 && <span className="muted">· {sel.length} selected{selFiles.length ? ` (${fmtBytes(selSize)})` : ''}</span>}
             {next && (
               <span className="push-right row-gap">
                 <button className="btn btn-xs" disabled={loading} onClick={() => load(next)}>Load more</button>
@@ -643,6 +654,10 @@ function ObjectBrowser({ bucket, prefix }) {
         </ContextMenu>
       )}
 
+      {modal?.type === 'search' && <S3Search key={prefix} bucket={bucket} prefix={prefix} onClose={() => setModal(null)} />}
+      {modal?.type === 'path' && <S3PathModal initialPath={`s3://${bucket}/${prefix}`} onClose={() => setModal(null)} />}
+      {modal?.type === 'upload-path' && <UploadToPathModal initialPath={`s3://${bucket}/${prefix}`} onClose={() => setModal(null)} />}
+      {modal?.type === 'presign' && <ShareModal initialPath={`s3://${bucket}/${prefix}`} onClose={() => setModal(null)} />}
       {modal?.type === 'folder' && (
         <NewFolderModal bucket={bucket} prefix={prefix} onClose={() => setModal(null)} onCreated={() => { setModal(null); load(); }} />
       )}

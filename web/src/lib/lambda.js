@@ -2,7 +2,7 @@ import { api, getConn } from '../api.js';
 
 export const lambda = (op, input = {}) => api(`/api/lambda/op/${op}`, { method: 'POST', body: input });
 export const lambdaCw = (op, input = {}) => api(`/api/lambda/cw/${op}`, { method: 'POST', body: input });
-export const lambdaIam = (op, input = {}) => api(`/api/lambda/iam/${op}`, { method: 'POST', body: input });
+export const lambdaIam = (op, input = {}, { conn, signal } = {}) => api(`/api/lambda/iam/${op}`, { method: 'POST', body: input, conn, signal });
 export const invokeFunction = (input) => api('/api/lambda/invoke', { method: 'POST', body: input });
 export const codeFiles = (FunctionName, Qualifier) => api('/api/lambda/code/files', { method: 'POST', body: { FunctionName, ...(Qualifier ? { Qualifier } : {}) } });
 export const deployCode = (input) => api('/api/lambda/code/deploy', { method: 'POST', body: input });

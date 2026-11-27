@@ -1,4 +1,5 @@
 import { api, getConn } from '../api.js';
+import { lambdaIam } from './lambda.js';
 
 export const s3 = (op, input = {}) => api(`/api/s3/op/${op}`, { method: 'POST', body: input });
 
@@ -18,9 +19,8 @@ export const fmtDate = (d) => (d ? new Date(d).toLocaleString() : '—');
 
 export const baseName = (key) => String(key).replace(/\/$/, '').split('/').pop();
 export const parentPrefix = (prefix) => {
-  const parts = prefix.split('/').filter(Boolean);
-  parts.pop();
-  return parts.length ? `${parts.join('/')}/` : '';
+  const path = prefix.replace(/\/$/, '');
+  return path.slice(0, path.lastIndexOf('/') + 1);
 };
 export const extOf = (name) => {
   const m = /\.([^./]+)$/.exec(name);
@@ -29,6 +29,16 @@ export const extOf = (name) => {
 
 // Route helpers: #/s3/<bucket>/<prefix>
 export const s3Path = (bucket, prefix = '') => (bucket ? `/s3/${encodeURIComponent(bucket)}/${prefix.split('/').map(encodeURIComponent).join('/')}` : '/s3');
+export const s3ObjectPath = (bucket, key) => `${s3Path(bucket)}?object=${encodeURIComponent(key)}`;
+
+export function parseS3Uri(uri) {
+  const path = uri.trimStart().replace(/^s3:\/\//i, '').replace(/^\/+/, '');
+  const slash = path.indexOf('/');
+  const bucket = (slash < 0 ? path : path.slice(0, slash)).trim();
+  if (!/^[a-z0-9_.-]+$/i.test(bucket)) return null;
+  return { bucket, key: slash < 0 ? '' : path.slice(slash + 1) };
+}
+
 export function parseS3Route(arg) {
   const i = arg.indexOf('/');
   if (!arg) return { bucket: '', prefix: '' };
@@ -120,7 +130,26 @@ export async function deleteKeys(bucket, keys) {
 export const deletePrefix = (bucket, prefix, { versions = false, confirm } = {}) =>
   api('/api/s3/delete-prefix', { method: 'POST', body: { bucket, prefix, versions, confirm } });
 
-export const presign = (bucket, key, expires, versionId) => api('/api/s3/presign', { method: 'POST', body: { bucket, key, expires, versionId } });
+export const presign = (bucket, key, expires, versionId, { roleArn, externalId, conn } = {}) =>
+  api('/api/s3/presign', { method: 'POST', body: { bucket, key, expires, versionId, roleArn, externalId }, conn });
+
+export async function listSigningRoles(conn, signal) {
+  const roles = new Map();
+  const seenMarkers = new Set();
+  let marker;
+  do {
+    const page = await lambdaIam('ListRoles', { MaxItems: 1000, Marker: marker }, { conn, signal });
+    if (signal.aborted) return [];
+    for (const { Arn, RoleName } of page.Roles || []) {
+      if (Arn) roles.set(Arn, [Arn, RoleName || Arn]);
+    }
+    if (!page.IsTruncated) break;
+    marker = page.Marker;
+    if (!marker || seenMarkers.has(marker)) throw new Error('IAM did not return the next page of roles');
+    seenMarkers.add(marker);
+  } while (marker);
+  return [...roles.values()].sort((a, b) => a[1].localeCompare(b[1]));
+}
 
 // Runs fn over items with limited concurrency.
 export async function pool(items, limit, fn, signal) {
@@ -136,13 +165,14 @@ export async function pool(items, limit, fn, signal) {
 }
 
 /** Upload a Blob/File through the server with progress. Returns { promise, abort }. */
-export function uploadBlob(bucket, key, blob, onProgress, conn = getConn()) {
+export function uploadBlob(bucket, key, blob, { onProgress, conn = getConn(), createOnly = false } = {}) {
   const xhr = new XMLHttpRequest();
   const promise = new Promise((resolve, reject) => {
     const q = new URLSearchParams({ bucket, key });
     xhr.open('PUT', `/api/s3/object?${q}`);
     xhr.setRequestHeader('x-requested-with', 'aws-tool-web');
     if (conn) xhr.setRequestHeader('x-conn', encodeURIComponent(JSON.stringify(conn)));
+    if (createOnly) xhr.setRequestHeader('if-none-match', '*');
     xhr.setRequestHeader('x-object-content-type', blob.type || guessType(key));
     xhr.setRequestHeader('content-type', 'application/octet-stream');
     xhr.upload.onprogress = (e) => onProgress?.(e.loaded, e.total);
@@ -154,7 +184,12 @@ export function uploadBlob(bucket, key, blob, onProgress, conn = getConn()) {
         body = { message: xhr.responseText };
       }
       if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-      else reject(Object.assign(new Error(body?.message || `HTTP ${xhr.status}`), { name: body?.error || 'Error', status: xhr.status }));
+      else {
+        const message = createOnly && [409, 412].includes(xhr.status)
+          ? 'The S3 destination changed during upload. Check the path again before retrying.'
+          : body?.message || `HTTP ${xhr.status}`;
+        reject(Object.assign(new Error(message), { name: body?.error || 'Error', status: xhr.status }));
+      }
     };
     xhr.onerror = () => reject(new Error('Network error'));
     xhr.onabort = () => reject(new Error('Cancelled'));

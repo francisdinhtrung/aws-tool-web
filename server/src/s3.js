@@ -1,5 +1,7 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import * as S3 from '@aws-sdk/client-s3';
+import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { HttpError } from './profiles.js';
@@ -42,6 +44,38 @@ const need = (v, name) => {
   return String(v);
 };
 
+const ROLE_ARN = /^arn:aws(?:-[a-z0-9]+)*:iam::\d{12}:role\/[\x21-\x7e]+$/;
+
+async function headBucketRegion(client, bucket) {
+  try {
+    return (await client.send(new S3.HeadBucketCommand({ Bucket: bucket }))).BucketRegion;
+  } catch (e) {
+    return e.$response?.headers?.['x-amz-bucket-region'];
+  }
+}
+
+async function assumeSigningRole(base, roleArn, externalId) {
+  const sts = new STSClient({ region: base.region, credentials: base.credentials, maxAttempts: base.maxAttempts });
+  try {
+    const { Credentials: credentials } = await sts.send(new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `aws-tool-web-${randomUUID()}`,
+      ExternalId: externalId,
+    }));
+    if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken || !credentials.Expiration) {
+      throw new HttpError(502, 'InvalidRoleCredentials', 'STS did not return a complete role session');
+    }
+    return {
+      accessKeyId: credentials.AccessKeyId,
+      secretAccessKey: credentials.SecretAccessKey,
+      sessionToken: credentials.SessionToken,
+      expiration: credentials.Expiration,
+    };
+  } finally {
+    sts.destroy();
+  }
+}
+
 /**
  * S3 routes. `resolve(raw)` turns the x-conn header into a connection, `config(r)` builds the base SDK config,
  * `serialize(out)` makes SDK output JSON safe.
@@ -61,12 +95,7 @@ export function s3Routes({ resolve, config, serialize }) {
   async function bucketRegion(r, bucket) {
     const k = `${r.key}|${bucket}`;
     if (regions.has(k)) return regions.get(k);
-    let region;
-    try {
-      region = (await clientFor(r, r.region).send(new S3.HeadBucketCommand({ Bucket: bucket }))).BucketRegion;
-    } catch (e) {
-      region = e.$response?.headers?.['x-amz-bucket-region'];
-    }
+    const region = await headBucketRegion(clientFor(r, r.region), bucket);
     if (region) regions.set(k, region);
     return region || r.region;
   }
@@ -99,6 +128,7 @@ export function s3Routes({ resolve, config, serialize }) {
     const Key = need(req.query.key, 'key');
     const { s3 } = await ctx(req, Bucket);
     const params = { Bucket, Key, ContentType: req.get('x-object-content-type') || 'application/octet-stream' };
+    if (req.get('if-none-match') === '*') params.IfNoneMatch = '*';
     if (req.get('content-length') === '0') {
       const out = await s3.send(new S3.PutObjectCommand({ ...params, Body: '' }));
       return res.json({ ETag: out.ETag, VersionId: out.VersionId });
@@ -107,8 +137,17 @@ export function s3Routes({ resolve, config, serialize }) {
     res.on('close', () => {
       if (!res.writableFinished) upload.abort().catch(() => {});
     });
-    const out = await upload.done();
-    res.json({ ETag: out.ETag, VersionId: out.VersionId });
+    try {
+      const out = await upload.done();
+      res.json({ ETag: out.ETag, VersionId: out.VersionId });
+    } catch (e) {
+      // lib-storage leaves parts in place when the condition fails at completion.
+      const status = e.statusCode || e.$metadata?.httpStatusCode;
+      if (params.IfNoneMatch && upload.uploadId && [409, 412].includes(status)) {
+        await s3.send(new S3.AbortMultipartUploadCommand({ Bucket, Key, UploadId: upload.uploadId })).catch(() => {});
+      }
+      throw e;
+    }
   });
 
   // Download / inline preview. GET so it works from <a href>, <img> and <video>; the connection comes in ?conn=.
@@ -144,10 +183,46 @@ export function s3Routes({ resolve, config, serialize }) {
   router.post('/presign', async (req, res) => {
     const Bucket = need(req.body?.bucket, 'bucket');
     const Key = need(req.body?.key, 'key');
-    const expiresIn = Math.min(604800, Math.max(1, Number(req.body.expires) || 3600));
-    const { s3 } = await ctx(req, Bucket);
-    const url = await getSignedUrl(s3, new S3.GetObjectCommand({ Bucket, Key, VersionId: req.body.versionId || undefined }), { expiresIn });
-    res.json({ url, expiresIn });
+    const { roleArn, externalId } = req.body;
+    if (roleArn !== undefined && (typeof roleArn !== 'string' || roleArn.length > 2048 || !ROLE_ARN.test(roleArn))) {
+      throw new HttpError(400, 'InvalidRoleArn', 'Enter an IAM role ARN');
+    }
+    if (externalId !== undefined && (!roleArn || typeof externalId !== 'string' || !/^[\w+=,.@:/-]{2,1224}$/.test(externalId))) {
+      throw new HttpError(400, 'InvalidExternalId', 'Enter a valid external ID for the IAM role');
+    }
+
+    const r = await resolve(req.get('x-conn') || req.query.conn);
+    const base = config(r);
+    let region = r.region;
+    let credentials;
+    if (roleArn) {
+      if (r.kind === 'endpoint') throw new HttpError(400, 'RoleRequiresAwsConnection', 'Select an AWS profile or the default credential chain to assume an IAM role');
+      credentials = await assumeSigningRole(base, roleArn, externalId);
+      const probe = new S3.S3Client(s3ClientConfig({ ...base, credentials }, r, region));
+      try {
+        region = (await headBucketRegion(probe, Bucket)) || region;
+      } finally {
+        probe.destroy();
+      }
+    } else {
+      if (r.kind !== 'endpoint') region = await bucketRegion(r, Bucket);
+      credentials = await clientFor(r, region).config.credentials();
+    }
+
+    const signingDate = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const requested = Math.min(604800, Math.max(1, Math.floor(Number(req.body.expires) || 3600)));
+    const remaining = credentials.expiration ? Math.floor((credentials.expiration.getTime() - signingDate.getTime()) / 1000) : requested;
+    if (!Number.isFinite(remaining) || remaining < 1) throw new HttpError(400, 'ExpiredSigningCredentials', 'Refresh your AWS session and generate the URL again');
+    const expiresIn = Math.min(requested, remaining);
+    // Pin the credentials so their expiration and the signature use the same session.
+    const signer = new S3.S3Client(s3ClientConfig({ ...base, credentials }, r, region));
+    try {
+      const url = await getSignedUrl(signer, new S3.GetObjectCommand({ Bucket, Key, VersionId: req.body.versionId || undefined }), { expiresIn, signingDate });
+      const expiresAt = new Date(signingDate.getTime() + expiresIn * 1000).toISOString();
+      res.set('Cache-Control', 'private, no-store').json({ url, expiresIn, expiresAt });
+    } finally {
+      signer.destroy();
+    }
   });
 
   // Recursively delete everything under a prefix. versions=true also removes old versions and delete markers.

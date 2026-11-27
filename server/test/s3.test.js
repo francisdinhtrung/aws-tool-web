@@ -1,18 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { Readable } from 'node:stream';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   S3Client, ListObjectsV2Command, HeadBucketCommand, CreateBucketCommand, GetObjectCommand, PutObjectCommand,
   DeleteObjectsCommand, ListObjectVersionsCommand, ListBucketsCommand, DeleteBucketCommand,
+  CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
 } from '@aws-sdk/client-s3';
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { tempEnv } from './helpers.js';
 import { createApp, cleanEndpoint } from '../src/app.js';
 import { contentDisposition, s3ClientConfig, INLINE_TYPES } from '../src/s3.js';
 
 const s3Mock = mockClient(S3Client);
 const ddbMock = mockClient(DynamoDBClient);
+const stsMock = mockClient(STSClient);
 const H = { 'x-requested-with': 'aws-tool-web' };
 const conn = (c) => encodeURIComponent(JSON.stringify(c));
 const PROFILE = conn({ kind: 'profile', profile: 'default', region: 'us-west-2' });
@@ -21,6 +24,7 @@ let env;
 beforeEach(async () => {
   s3Mock.reset();
   ddbMock.reset();
+  stsMock.reset();
   env = await tempEnv({
     config: '[default]\nregion = us-west-2\n',
     credentials: '[default]\naws_access_key_id = AKIA\naws_secret_access_key = SECRET\n',
@@ -175,6 +179,28 @@ describe('object upload', () => {
     expect(s3Mock.commandCalls(PutObjectCommand)[0].args[0].input).toEqual({ Bucket: 'b', Key: 'empty', ContentType: 'application/octet-stream', Body: '' });
   });
 
+  it.each([Buffer.alloc(0), Buffer.from('hello')])('enforces create-only uploads with PutObject', async (body) => {
+    s3Mock.on(HeadBucketCommand).resolves({ BucketRegion: 'us-west-2' });
+    s3Mock.on(PutObjectCommand).rejects(Object.assign(new Error('Key exists'), { name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } }));
+    const res = await request(app()).put('/api/s3/object?bucket=b&key=conflict').set(H).set('x-conn', PROFILE)
+      .set('if-none-match', '*').set('content-type', 'application/octet-stream').set('content-length', String(body.length)).send(body);
+    expect(res.status).toBe(412);
+    expect(s3Mock.commandCalls(PutObjectCommand)[0].args[0].input).toMatchObject({ Bucket: 'b', Key: 'conflict', IfNoneMatch: '*' });
+  });
+
+  it('enforces create-only multipart completion and aborts the upload on conflict', async () => {
+    s3Mock.on(HeadBucketCommand).resolves({ BucketRegion: 'us-west-2' });
+    s3Mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'upload-1' });
+    s3Mock.on(UploadPartCommand).resolves({ ETag: '"part"' });
+    s3Mock.on(CompleteMultipartUploadCommand).rejects(Object.assign(new Error('Key exists'), { name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } }));
+    s3Mock.on(AbortMultipartUploadCommand).resolves({});
+    const res = await request(app()).put('/api/s3/object?bucket=b&key=conflict').set(H).set('x-conn', PROFILE)
+      .set('if-none-match', '*').set('content-type', 'application/octet-stream').send(Buffer.alloc(9 * 1024 * 1024));
+    expect(res.status).toBe(412);
+    expect(s3Mock.commandCalls(CompleteMultipartUploadCommand)[0].args[0].input).toMatchObject({ IfNoneMatch: '*', UploadId: 'upload-1' });
+    expect(s3Mock.commandCalls(AbortMultipartUploadCommand)[0].args[0].input).toEqual({ Bucket: 'b', Key: 'conflict', UploadId: 'upload-1' });
+  });
+
   it('is protected against CSRF', async () => {
     expect((await request(app()).put('/api/s3/object?bucket=b&key=k').send('x')).status).toBe(403);
   });
@@ -187,6 +213,69 @@ describe('presign and delete-prefix', () => {
     expect(res.status).toBe(200);
     expect(res.body.expiresIn).toBe(604800);
     expect(res.body.url).toMatch(/^https:\/\/s3\.eu-west-1\.amazonaws\.com\/b\/a%20b\.txt\?.*X-Amz-Credential=AKIA%2F.*X-Amz-Signature=/);
+  });
+
+  it('assumes the selected role and signs in the bucket region with the role session token', async () => {
+    const roleArn = 'arn:aws:iam::123456789012:role/team/S3Download';
+    const expiration = new Date(Math.floor(Date.now() / 1000) * 1000 + 1_800_000);
+    stsMock.on(AssumeRoleCommand).resolves({ Credentials: {
+      AccessKeyId: 'ASIAFIXTURE', SecretAccessKey: 'role-fixture-secret', SessionToken: 'role-fixture-token', Expiration: expiration,
+    } });
+    s3Mock.on(HeadBucketCommand).rejects(Object.assign(new Error('Forbidden'), {
+      $response: { headers: { 'x-amz-bucket-region': 'ap-southeast-1' } },
+    }));
+    const res = await post(app(), '/api/s3/presign', {
+      bucket: 'private-bucket', key: 'a b.txt', versionId: 'v-1', expires: 3600, roleArn, externalId: 'test-external-id',
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe('private, no-store');
+    const assume = stsMock.commandCalls(AssumeRoleCommand)[0];
+    expect(assume.args[0].input).toEqual({ RoleArn: roleArn, ExternalId: 'test-external-id', RoleSessionName: expect.stringMatching(/^aws-tool-web-/) });
+    expect((await assume.thisValue.config.credentials()).accessKeyId).toBe('AKIA');
+    const probe = s3Mock.commandCalls(HeadBucketCommand)[0];
+    expect((await probe.thisValue.config.credentials()).accessKeyId).toBe('ASIAFIXTURE');
+
+    const url = new URL(res.body.url);
+    expect(url.hostname).toBe('private-bucket.s3.ap-southeast-1.amazonaws.com');
+    expect(url.pathname).toBe('/a%20b.txt');
+    expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^ASIAFIXTURE\/.+\/ap-southeast-1\/s3\//);
+    expect(url.searchParams.get('X-Amz-Security-Token')).toBe('role-fixture-token');
+    expect(url.searchParams.get('versionId')).toBe('v-1');
+    expect(Number(url.searchParams.get('X-Amz-Expires'))).toBe(res.body.expiresIn);
+    expect(res.body.expiresIn).toBeLessThanOrEqual(1800);
+    expect(res.body.expiresAt).toBe(expiration.toISOString());
+    expect(res.text).not.toContain('role-fixture-secret');
+  });
+
+  it('honors the lifetime of an existing session without assuming another role', async () => {
+    const expiration = new Date(Math.floor(Date.now() / 1000) * 1000 + 900_000);
+    vi.stubEnv('AWS_PROFILE', '');
+    vi.stubEnv('AWS_ACCESS_KEY_ID', 'ASIACURRENT');
+    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'current-fixture-secret');
+    vi.stubEnv('AWS_SESSION_TOKEN', 'current-fixture-token');
+    vi.stubEnv('AWS_CREDENTIAL_EXPIRATION', expiration.toISOString());
+    s3Mock.on(HeadBucketCommand).resolves({ BucketRegion: 'us-west-2' });
+    try {
+      const res = await post(app(), '/api/s3/presign', { bucket: 'b', key: 'a.txt', expires: 3600 }, conn({ kind: 'default', region: 'us-west-2' }));
+      expect(res.status).toBe(200);
+      expect(res.body.expiresIn).toBeLessThanOrEqual(900);
+      expect(res.body.expiresAt).toBe(expiration.toISOString());
+      expect(new URL(res.body.url).searchParams.get('X-Amz-Security-Token')).toBe('current-fixture-token');
+      expect(stsMock.commandCalls(AssumeRoleCommand)).toHaveLength(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('returns the STS denial without signing with the source profile', async () => {
+    stsMock.on(AssumeRoleCommand).rejects(Object.assign(new Error('Role trust denied'), {
+      name: 'AccessDenied', $metadata: { httpStatusCode: 403 },
+    }));
+    const res = await post(app(), '/api/s3/presign', { bucket: 'b', key: 'a.txt', roleArn: 'arn:aws:iam::123456789012:role/Restricted' });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: 'AccessDenied', message: 'Role trust denied' });
+    expect(res.body.url).toBeUndefined();
+    expect(s3Mock.commandCalls(HeadBucketCommand)).toHaveLength(0);
   });
 
   it('deletes every object under a prefix page by page', async () => {

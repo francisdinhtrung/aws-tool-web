@@ -1,38 +1,50 @@
 import React from 'react';
 import { useApp } from '../context.js';
 
+const TOOLS = [
+  ['Connections', '/connections', '⚙', 'Configure AWS profiles, credentials and custom endpoints.'],
+  ['Operation builder', '/ops', '⤢', 'Build DynamoDB operations and generate code for your SDK.'],
+  ['PartiQL editor', '/partiql', '⌨', 'Run DynamoDB statements, batches and transactions.'],
+  ['Data modeler', '/modeler', '▦', 'Design tables, indexes and access patterns.'],
+  ['S3 browser', '/s3', '▱', 'Browse, preview and transfer objects and folders.'],
+  ['Secrets Manager', '/secrets', '', 'Manage secrets and retrieve versioned values.'],
+];
+
 export default function Home() {
   const { conn, tables, info } = useApp();
   return (
-    <div className="page">
-      <div className="hero">
-        <h1>AWS Tool Web</h1>
-        <p className="muted">A self-hosted web console for AWS. DynamoDB Studio replaces NoSQL Workbench: manage AWS profiles, explore and edit data, build operations, run PartiQL and design data models. S3, CloudWatch Logs, SQS and Lambda are one click away in the top bar.</p>
-      </div>
-      {!conn ? (
-        <div className="card">
-          <h3>Get started</h3>
-          <ol className="steps">
-            <li>Open <a href="#/connections">Connections</a> to add or edit an AWS profile (written to <code>~/.aws</code>), or add a DynamoDB Local endpoint.</li>
-            <li>Pick the connection in the top bar and choose a region.</li>
-            <li>Browse tables on the left, or use the Operation builder, PartiQL editor, Data modeler and S3 browser.</li>
-          </ol>
+    <div className="page home-page">
+      <div className="home-overview">
+        <div className="home-intro">
+          <h1>AWS Tool Web</h1>
+          <p>Explore and manage AWS resources from one console.</p>
         </div>
-      ) : (
-        <div className="card">
-          <h3>Connected: {info.label}</h3>
-          <p className="muted">
-            {info.endpoint ? `Endpoint ${info.endpoint}` : `Region ${info.region}`} · {tables.length} tables
-          </p>
-        </div>
-      )}
-      <div className="feature-grid">
-        <a className="card feature" href="#/connections"><h4>⚙ Connections</h4><p>Create, edit and delete AWS profiles (keys, SSO, assume-role) and custom endpoints.</p></a>
-        <a className="card feature" href="#/ops"><h4>⚡ Operation builder</h4><p>Get/Put/Update/Delete, Query/Scan, batch and transactions, with Python, JavaScript and CLI code.</p></a>
-        <a className="card feature" href="#/partiql"><h4>⌨ PartiQL editor</h4><p>Run SQL-compatible statements and transactions with history.</p></a>
-        <a className="card feature" href="#/s3"><h4>🪣 S3 browser</h4><p>Browse buckets like a file manager: upload (drag & drop, folders), download, preview, copy/move/rename, share links, versions, tags and bucket settings.</p></a>
-        <a className="card feature" href="#/modeler"><h4>▦ Data modeler</h4><p>Design tables, GSIs and facets, visualize access patterns, import/export Workbench models, commit to DynamoDB, export CloudFormation.</p></a>
+        {conn ? (
+          <div className="home-context">
+            <h3>Connected: {info.label}</h3>
+            <p>{info.endpoint ? `Endpoint ${info.endpoint}` : `Region ${info.region}`} · {tables.length} tables</p>
+            <a href="#/connections">Manage connections <span aria-hidden="true">→</span></a>
+          </div>
+        ) : (
+          <div className="home-context">
+            <h3>Get started</h3>
+            <p>Add an AWS profile or a local endpoint, then select it in the connection picker.</p>
+            <a href="#/connections">Open Connections <span aria-hidden="true">→</span></a>
+          </div>
+        )}
       </div>
+      <section aria-labelledby="tools-title">
+        <h2 className="home-tools-title" id="tools-title">Workspace tools</h2>
+        <div className="feature-grid home-tools">
+          {TOOLS.map(([title, path, glyph, description]) => (
+            <a className="card feature tool-card" href={`#${path}`} key={path}>
+              <span className="feature-icon" aria-hidden="true">{glyph || <span className="lock-glyph" />}</span>
+              <span className="tool-card-copy"><strong>{title}</strong><span>{description}</span></span>
+              <span className="tool-card-arrow" aria-hidden="true">→</span>
+            </a>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

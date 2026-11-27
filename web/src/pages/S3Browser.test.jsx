@@ -1,8 +1,8 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithApp, mockBackend } from '../test/utils.jsx';
+import { renderWithApp, mockBackend, awsError } from '../test/utils.jsx';
 import { TransfersProvider, TransfersDock } from '../components/Transfers.jsx';
 import { setConn } from '../api.js';
 import S3Browser from './S3Browser.jsx';
@@ -36,7 +36,35 @@ const LISTING = {
 // The name cell of a row in the object grid (the details panel repeats the key as a title).
 const cell = (key) => document.querySelector(`td.name-col[title="${key}"]`);
 
+function captureUploads({ status = 200, responseText = '{"ETag":"e"}' } = {}) {
+  const sent = [];
+  class FakeXHR {
+    upload = {};
+    headers = {};
+    open(method, url) {
+      this.method = method;
+      this.url = url;
+    }
+    setRequestHeader(k, v) {
+      this.headers[k] = v;
+    }
+    send(body) {
+      sent.push(this);
+      this.body = body;
+      setTimeout(() => {
+        this.upload.onprogress?.({ loaded: body.size, total: body.size });
+        this.status = status;
+        this.responseText = responseText;
+        this.onload();
+      });
+    }
+  }
+  vi.stubGlobal('XMLHttpRequest', FakeXHR);
+  return sent;
+}
+
 beforeEach(() => setConn({ kind: 'endpoint', id: 'e1' }));
+afterEach(() => vi.unstubAllGlobals());
 
 describe('bucket list', () => {
   it('lists, filters and creates buckets in the connection region', async () => {
@@ -76,6 +104,201 @@ describe('bucket list', () => {
   it('shows list errors and the empty state', () => {
     view('', { bucketInfo: [], buckets: [], bucketsState: { error: 'AccessDenied: nope', loaded: true } });
     expect(screen.getByText('AccessDenied: nope')).toBeInTheDocument();
+  });
+});
+
+describe('pre-signed URLs', () => {
+  it('generates and copies a link for an exact S3 URI outside the listed buckets', async () => {
+    const url = 'https://example.test/object?X-Amz-Signature=fixture';
+    const backend = mockBackend({ 'POST /api/s3/presign': { url } });
+    const user = userEvent.setup();
+    view('');
+    await user.click(screen.getByRole('button', { name: 'Create pre-signed URL' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Create pre-signed URL' }));
+    const path = dialog.getByRole('textbox', { name: /^S3 URI/ });
+    const generate = () => dialog.getByRole('button', { name: 'Generate', exact: true });
+    expect(generate()).toBeDisabled();
+    fireEvent.change(path, { target: { value: 's3://private-bucket/reports/' } });
+    expect(generate()).toBeDisabled();
+
+    fireEvent.change(path, { target: { value: 's3://private-bucket/reports/résumé #?+%2F.pdf' } });
+    await user.selectOptions(dialog.getByLabelText('Expires in'), '900');
+    await user.click(generate());
+    expect(await dialog.findByRole('textbox', { name: 'Pre-signed URL' })).toHaveValue(url);
+    expect(backend.calls('POST /api/s3/presign')).toEqual([{ bucket: 'private-bucket', key: 'reports/résumé #?+%2F.pdf', expires: 900 }]);
+    expect(backend.calls('POST /api/s3/op/ListObjectsV2')).toHaveLength(0);
+    await user.click(dialog.getByRole('button', { name: 'Copy URL' }));
+    expect(await navigator.clipboard.readText()).toBe(url);
+
+    await user.selectOptions(dialog.getByLabelText('Expires in'), '3600');
+    expect(dialog.queryByRole('textbox', { name: 'Pre-signed URL' })).not.toBeInTheDocument();
+  });
+
+  it('prefills the current S3 folder and lets the user complete the file path', async () => {
+    const backend = mockBackend({ 'POST /api/s3/op/ListObjectsV2': LISTING, 'POST /api/s3/presign': { url: 'https://example.test/signed' } });
+    const user = userEvent.setup();
+    view('b/p');
+    await user.click(screen.getByRole('button', { name: 'Create pre-signed URL' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Create pre-signed URL' }));
+    const path = dialog.getByRole('textbox', { name: /^S3 URI/ });
+    expect(path).toHaveValue('s3://b/p/');
+    expect(dialog.getByRole('button', { name: 'Generate', exact: true })).toBeDisabled();
+    await user.type(path, 'sub/unlisted.txt{Enter}');
+    expect(await dialog.findByRole('textbox', { name: 'Pre-signed URL' })).toHaveValue('https://example.test/signed');
+    expect(backend.calls('POST /api/s3/presign')).toEqual([{ bucket: 'b', key: 'p/sub/unlisted.txt', expires: 3600 }]);
+  });
+
+  it('lists role pages for the selected AWS profile and signs with the chosen role', async () => {
+    const profile = { kind: 'profile', profile: 'work-sso', region: 'ap-southeast-1' };
+    const firstRole = 'arn:aws:iam::123456789012:role/ReportsRead';
+    const chosenRole = 'arn:aws:iam::123456789012:role/team/S3Download';
+    const backend = mockBackend({
+      'POST /api/lambda/iam/ListRoles': ({ Marker }) => Marker
+        ? { Roles: [{ Arn: chosenRole, RoleName: 'S3Download' }], IsTruncated: false }
+        : { Roles: [{ Arn: firstRole, RoleName: 'ReportsRead' }], IsTruncated: true, Marker: 'next' },
+      'POST /api/s3/presign': { url: 'https://example.test/role-signed', expiresAt: '2026-11-27T10:00:00Z' },
+    });
+    const user = userEvent.setup();
+    view('', { conn: profile });
+    await user.click(screen.getByRole('button', { name: 'Create pre-signed URL' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Create pre-signed URL' }));
+    fireEvent.change(dialog.getByRole('textbox', { name: /^S3 URI/ }), { target: { value: 's3://private-bucket/report.csv' } });
+    expect(backend.calls('POST /api/lambda/iam/ListRoles')).toHaveLength(0);
+    await user.selectOptions(dialog.getByLabelText('Signing credentials'), 'role');
+    await dialog.findByRole('option', { name: 'S3Download' });
+    await user.selectOptions(dialog.getByRole('combobox', { name: /^IAM role/ }), chosenRole);
+    expect(dialog.getByRole('textbox', { name: /^IAM role ARN/ })).toHaveValue(chosenRole);
+    await user.click(dialog.getByRole('button', { name: 'Generate', exact: true }));
+    expect(await dialog.findByRole('textbox', { name: 'Pre-signed URL' })).toHaveValue('https://example.test/role-signed');
+    expect(dialog.getByText(/^Expires at /)).toBeInTheDocument();
+    expect(backend.calls('POST /api/lambda/iam/ListRoles')).toEqual([{ MaxItems: 1000 }, { MaxItems: 1000, Marker: 'next' }]);
+    expect(backend.calls('POST /api/s3/presign')).toEqual([{ bucket: 'private-bucket', key: 'report.csv', expires: 3600, roleArn: chosenRole }]);
+    const roleRequests = backend.log.filter(({ key }) => key.includes('/iam/ListRoles') || key.includes('/s3/presign'));
+    expect(roleRequests.map(({ headers }) => JSON.parse(decodeURIComponent(headers['x-conn'])))).toEqual([profile, profile, profile]);
+  });
+
+  it('accepts a pasted role ARN when the AWS profile cannot list roles', async () => {
+    const roleArn = 'arn:aws:iam::987654321098:role/SharedFilesRead';
+    const backend = mockBackend({
+      'POST /api/lambda/iam/ListRoles': () => { throw awsError('AccessDenied', 'Missing iam:ListRoles', 403); },
+      'POST /api/s3/presign': { url: 'https://example.test/role-signed' },
+    });
+    const user = userEvent.setup();
+    view('', { conn: { kind: 'profile', profile: 'work-sso', region: 'ap-southeast-1' } });
+    await user.click(screen.getByRole('button', { name: 'Create pre-signed URL' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Create pre-signed URL' }));
+    fireEvent.change(dialog.getByRole('textbox', { name: /^S3 URI/ }), { target: { value: 's3://shared-bucket/report.csv' } });
+    await user.selectOptions(dialog.getByLabelText('Signing credentials'), 'role');
+    expect(await dialog.findByText(/Could not list IAM roles/)).toHaveTextContent('AccessDenied');
+    const generate = dialog.getByRole('button', { name: 'Generate', exact: true });
+    expect(generate).toBeDisabled();
+    fireEvent.change(dialog.getByRole('textbox', { name: /^IAM role ARN/ }), { target: { value: roleArn } });
+    fireEvent.change(dialog.getByLabelText('External ID (optional)'), { target: { value: 'shared-external-id' } });
+    await user.click(generate);
+    expect(await dialog.findByRole('textbox', { name: 'Pre-signed URL' })).toBeInTheDocument();
+    expect(backend.calls('POST /api/s3/presign')).toEqual([{
+      bucket: 'shared-bucket', key: 'report.csv', expires: 3600, roleArn, externalId: 'shared-external-id',
+    }]);
+  });
+});
+
+describe('upload to S3 path', () => {
+  it.each([
+    { arg: 'b/p', path: 's3://logs/archive/résumé #+%2F.txt', key: 'archive/résumé #+%2F.txt' },
+    { arg: '', path: 's3://logs/archive/', key: 'archive/local.txt' },
+  ])('uploads a single file to $path', async ({ arg, path, key }) => {
+    const sent = captureUploads();
+    const user = userEvent.setup();
+    const backend = mockBackend({
+      'POST /api/s3/op/ListObjectsV2': LISTING,
+      'POST /api/s3/op/HeadObject': () => { throw awsError('NotFound', 'Object not found', 404); },
+    });
+    view(arg);
+    if (arg) {
+      await screen.findByText('a.txt');
+      await user.click(screen.getByRole('button', { name: '⬆ Upload ▾' }));
+    }
+    await user.click(screen.getByRole('button', { name: 'Upload to S3 path' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Upload file to S3 path' }));
+    const submit = dialog.getByRole('button', { name: 'Upload' });
+    const destination = dialog.getByRole('textbox', { name: /^Destination S3 path/ });
+    expect(destination).toHaveValue(arg ? 's3://b/p/' : '');
+    expect(submit).toBeDisabled();
+
+    const file = new File(['hello'], 'local.txt', { type: 'text/plain' });
+    await user.upload(dialog.getByLabelText('File'), file);
+    fireEvent.change(destination, { target: { value: 'https://example.com/file' } });
+    expect(submit).toBeDisabled();
+    fireEvent.change(destination, { target: { value: path } });
+    const uri = `s3://logs/${key}`;
+    expect(dialog.getByText(uri)).toBeInTheDocument();
+    await user.click(submit);
+
+    expect(await screen.findByText('Done')).toBeInTheDocument();
+    expect(screen.getByText(uri)).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ method: 'PUT', body: file });
+    expect(backend.calls('POST /api/s3/op/HeadObject')).toEqual([{ Bucket: 'logs', Key: key }]);
+    expect(sent[0].headers['if-none-match']).toBe('*');
+    expect(Object.fromEntries(new URLSearchParams(sent[0].url.split('?')[1]))).toEqual({ bucket: 'logs', key });
+  });
+
+  async function prepareUpload(headObject, response) {
+    const sent = captureUploads(response);
+    const user = userEvent.setup();
+    mockBackend({ 'POST /api/s3/op/HeadObject': headObject });
+    view('');
+    await user.click(screen.getByRole('button', { name: 'Upload to S3 path' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Upload file to S3 path' }));
+    const file = new File(['hello'], 'local.txt');
+    await user.upload(dialog.getByLabelText('File'), file);
+    fireEvent.change(dialog.getByRole('textbox'), { target: { value: 's3://logs/archive/local.txt' } });
+    await user.click(dialog.getByRole('button', { name: 'Upload' }));
+    return { sent, user, file };
+  }
+
+  it('queues an existing destination only after explicit overwrite confirmation', async () => {
+    const { sent, user, file } = await prepareUpload({ ETag: '"existing"' });
+    const confirm = () => within(screen.getByRole('dialog', { name: 'Overwrite existing file?' }));
+    expect(confirm().getByText('s3://logs/archive/local.txt')).toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+
+    await user.click(confirm().getByRole('button', { name: 'Cancel' }));
+    const form = within(screen.getByRole('dialog', { name: 'Upload file to S3 path' }));
+    expect(form.getByLabelText('File').files[0]).toBe(file);
+    expect(sent).toHaveLength(0);
+
+    await user.click(form.getByRole('button', { name: 'Upload' }));
+    await user.click(confirm().getByRole('button', { name: 'Overwrite' }));
+    expect(await screen.findByText('Done')).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].headers['if-none-match']).toBeUndefined();
+  });
+
+  it('shows a lookup error without sending an upload when access is denied', async () => {
+    const { sent } = await prepareUpload(() => { throw awsError('AccessDenied', 'Forbidden', 403); });
+    expect(await screen.findByText(/Could not check the destination.*AccessDenied/)).toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('does not upload if the dialog closes during the destination check', async () => {
+    let rejectCheck;
+    const pending = new Promise((_resolve, reject) => { rejectCheck = reject; });
+    const { sent, user } = await prepareUpload(() => pending);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(async () => rejectCheck(awsError('NotFound', 'Object not found', 404)));
+    expect(sent).toHaveLength(0);
+  });
+
+  it('reports a concurrent creation as a failed task without retrying the upload', async () => {
+    const { sent } = await prepareUpload(() => { throw awsError('NotFound', 'Object not found', 404); }, {
+      status: 412,
+      responseText: '{"error":"PreconditionFailed","message":"Key exists"}',
+    });
+    expect(await screen.findByText(/The S3 destination changed during upload/)).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].headers['if-none-match']).toBe('*');
   });
 });
 
@@ -218,29 +441,7 @@ describe('object browser', () => {
   });
 
   it('uploads files through the task queue', async () => {
-    const sent = [];
-    class FakeXHR {
-      upload = {};
-      headers = {};
-      open(method, url) {
-        this.method = method;
-        this.url = url;
-      }
-      setRequestHeader(k, v) {
-        this.headers[k] = v;
-      }
-      send(body) {
-        sent.push(this);
-        this.body = body;
-        setTimeout(() => {
-          this.upload.onprogress?.({ loaded: body.size, total: body.size });
-          this.status = 200;
-          this.responseText = '{"ETag":"e"}';
-          this.onload();
-        });
-      }
-    }
-    vi.stubGlobal('XMLHttpRequest', FakeXHR);
+    const sent = captureUploads();
     mockBackend({ 'POST /api/s3/op/ListObjectsV2': LISTING });
     view('b/p');
     await screen.findByText('a.txt');
@@ -250,7 +451,6 @@ describe('object browser', () => {
     expect(sent[0].url).toBe('/api/s3/object?bucket=b&key=p%2Fnew.txt');
     expect(sent[0].headers).toMatchObject({ 'x-requested-with': 'aws-tool-web', 'x-object-content-type': 'text/plain' });
     expect(JSON.parse(decodeURIComponent(sent[0].headers['x-conn']))).toEqual({ kind: 'endpoint', id: 'e1' });
-    vi.unstubAllGlobals();
   });
 
   it('shows listing errors', async () => {

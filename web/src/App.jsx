@@ -38,17 +38,19 @@ import SfnActivities from './pages/SfnActivities.jsx';
 import SfnSidebar from './components/SfnSidebar.jsx';
 import { CreateStateMachineModal } from './components/SfnModals.jsx';
 import { listAllStateMachines, sfnPath } from './lib/sfn.js';
+import SecretsManager from './pages/SecretsManager.jsx';
 
 // Sections that belong to one service; anything else (home, connections) keeps the last workspace.
 const DDB_SECTIONS = new Set(['table', 'ops', 'partiql', 'modeler']);
 
 const WORKSPACES = [
-  ['dynamodb', 'DynamoDB', '◆', 'DynamoDB Studio', '/'],
-  ['s3', 'S3', '🪣', 'S3 Browser', '/s3'],
-  ['logs', 'CloudWatch', '📜', 'CloudWatch Logs', '/logs'],
-  ['sqs', 'SQS', '📨', 'SQS Console', '/sqs'],
-  ['lambda', 'Lambda', 'λ', 'Lambda Console', '/lambda'],
-  ['sfn', 'Step Functions', '⛓', 'Step Functions', '/sfn'],
+  ['dynamodb', 'DynamoDB', '▤', 'DynamoDB Studio', '/', 'DynamoDB'],
+  ['s3', 'S3', '▱', 'S3 Browser', '/s3', 'S3'],
+  ['logs', 'CloudWatch', '≋', 'CloudWatch Logs', '/logs', 'CloudWatch'],
+  ['sqs', 'SQS', '⇄', 'SQS Console', '/sqs', 'SQS'],
+  ['lambda', 'Lambda', 'λ', 'Lambda Console', '/lambda', 'Lambda'],
+  ['sfn', 'Step Functions', '⇢', 'Step Functions', '/sfn', 'Step Fn'],
+  ['secrets', 'Secrets Manager', '', 'Secrets Manager', '/secrets', 'Secrets'],
 ];
 
 const connValue = (c) => (!c ? '' : c.kind === 'profile' ? `p:${c.profile}` : c.kind === 'endpoint' ? `e:${c.id}` : 'd');
@@ -65,6 +67,7 @@ export default function App() {
 
 function Shell() {
   const route = useHashRoute();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conn, setConnState] = useLocalStorage('ddbs.conn', null);
   const [profiles, setProfiles] = useState([]);
   const [endpoints, setEndpoints] = useState([]);
@@ -88,7 +91,9 @@ function Shell() {
   const [machinesState, setMachinesState] = useState({ loading: false, error: null, loaded: false, more: false });
 
   const [section, arg] = (() => {
-    const parts = route.split('?')[0].split('/').filter(Boolean);
+    const path = route.split('?')[0];
+    if (path.startsWith('/s3/')) return ['s3', path.slice('/s3/'.length)];
+    const parts = path.split('/').filter(Boolean);
     return [parts[0] || '', parts.slice(1).join('/')];
   })();
   const isS3 = section === 's3';
@@ -96,12 +101,14 @@ function Shell() {
   const isSqs = section === 'sqs';
   const isLambda = section === 'lambda';
   const isSfn = section === 'sfn';
-  const workspace = isS3 ? 's3' : isLogs ? 'logs' : isSqs ? 'sqs' : isLambda ? 'lambda' : isSfn ? 'sfn' : DDB_SECTIONS.has(section) ? 'dynamodb' : savedWorkspace;
+  const isSecrets = section === 'secrets';
+  const workspace = isS3 ? 's3' : isLogs ? 'logs' : isSqs ? 'sqs' : isLambda ? 'lambda' : isSfn ? 'sfn' : isSecrets ? 'secrets' : DDB_SECTIONS.has(section) ? 'dynamodb' : savedWorkspace;
   const s3ws = workspace === 's3';
   const logsws = workspace === 'logs';
   const sqsws = workspace === 'sqs';
   const lambdaws = workspace === 'lambda';
   const sfnws = workspace === 'sfn';
+  const secretsws = workspace === 'secrets';
   const ws = WORKSPACES.find((w) => w[0] === workspace) || WORKSPACES[0];
 
   // Remember the workspace when entering a service-specific page (only on route change, so the switcher can override it).
@@ -111,6 +118,7 @@ function Shell() {
     else if (section === 'sqs') setSavedWorkspace('sqs');
     else if (section === 'lambda') setSavedWorkspace('lambda');
     else if (section === 'sfn') setSavedWorkspace('sfn');
+    else if (section === 'secrets') setSavedWorkspace('secrets');
     else if (DDB_SECTIONS.has(section)) setSavedWorkspace('dynamodb');
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -119,13 +127,15 @@ function Shell() {
     document.title = `${ws[3]} · AWS Tool Web`;
   }, [workspace, ws]);
 
-  // S3, CloudWatch, SQS, Lambda and Step Functions have no home page of their own: their home is the resource list.
+  useEffect(() => setSidebarOpen(false), [route]);
+
   useEffect(() => {
-    if (!section && (s3ws || logsws || sqsws || lambdaws || sfnws)) navigate(ws[4]);
-  }, [s3ws, logsws, sqsws, lambdaws, sfnws, section, ws]);
+    if (!section && ws[4] !== '/') navigate(ws[4]);
+  }, [section, ws]);
 
   const switchWorkspace = (w) => {
     setSavedWorkspace(w);
+    setSidebarOpen(false);
     setFilter('');
     navigate(WORKSPACES.find((x) => x[0] === w)[4]);
   };
@@ -232,14 +242,16 @@ function Shell() {
   }, [reloadConnections]);
 
   useEffect(() => {
+    let current = true;
     clearDescCache();
     setStatus(null);
     if (workspace === 'dynamodb') reloadTables();
     if (conn) {
       api('/api/test', { method: 'POST', body: { service: workspace } })
-        .then((s) => setStatus({ ok: true, ...s }))
-        .catch((e) => setStatus({ ok: false, error: errorText(e) }));
+        .then((s) => { if (current) setStatus({ ok: true, ...s }); })
+        .catch((e) => { if (current) setStatus({ ok: false, error: errorText(e) }); });
     }
+    return () => { current = false; };
   }, [conn, reloadTables, workspace]);
 
   const setConn = useCallback((c) => setConnState(c), [setConnState]);
@@ -255,7 +267,11 @@ function Shell() {
     setConn({ kind: 'endpoint', id: v.slice(2) });
   };
 
-  const info = useMemo(() => connInfo(conn, profiles, endpoints), [conn, profiles, endpoints]);
+  const info = useMemo(() => {
+    const details = connInfo(conn, profiles, endpoints);
+    const override = secretsws && conn?.kind === 'endpoint' && endpoints.find((e) => e.id === conn.id)?.secretsEndpoint;
+    return override ? { ...details, endpoint: override } : details;
+  }, [conn, profiles, endpoints, secretsws]);
   const buckets = useMemo(() => bucketInfo.map((b) => b.Name), [bucketInfo]);
   const ctx = useMemo(
     () => ({
@@ -312,8 +328,11 @@ function Shell() {
 
   let page;
   if (section === 'connections') page = <Connections />;
-  else if (isS3) page = <S3Browser key={connValue(conn)} arg={arg} />;
-  else if (isLogs && currentLogGroup) page = <LogViewer key={`${connValue(conn)}:${currentLogGroup}`} group={currentLogGroup} />;
+  else if (isS3) {
+    const query = route.indexOf('?');
+    const objectKey = query < 0 ? null : new URLSearchParams(route.slice(query + 1)).get('object');
+    page = <S3Browser key={connValue(conn)} arg={arg} objectKey={objectKey} />;
+  } else if (isLogs && currentLogGroup) page = <LogViewer key={`${connValue(conn)}:${currentLogGroup}`} group={currentLogGroup} />;
   else if (isLogs && logArg[0] === 'insights') page = <LogsInsights key={connValue(conn)} />;
   else if (isLogs) page = <LogsHome key={connValue(conn)} />;
   else if (isSqs && currentQueue && conn) page = <SqsQueue key={`${connValue(conn)}:${currentQueue}`} name={currentQueue} />;
@@ -325,7 +344,11 @@ function Shell() {
   else if (isSfn && sfnArg[0] === 'activities') page = <SfnActivities key={connValue(conn)} />;
   else if (isSfn) page = <SfnHome key={connValue(conn)} onCreate={() => setCreating('machine')} />;
   else if (isLambda) page = <LambdaHome key={connValue(conn)} onCreate={() => setCreating('function')} />;
-  else if (!conn && section !== 'modeler') page = <Home />;
+  else if (isSecrets) {
+    const query = route.indexOf('?');
+    const secretId = query < 0 ? '' : new URLSearchParams(route.slice(query + 1)).get('secret') || '';
+    page = <SecretsManager key={`${connValue(conn)}:${conn?.region || ''}`} secretId={secretId} />;
+  } else if (!conn && section !== 'modeler') page = <Home />;
   else if (section === 'table' && arg) page = <TableView key={`${connValue(conn)}:${arg}`} name={decodeURIComponent(arg)} />;
   else if (section === 'ops') page = <OperationBuilder key={connValue(conn)} />;
   else if (section === 'partiql') page = <PartiQL key={connValue(conn)} />;
@@ -335,68 +358,78 @@ function Shell() {
   return (
     <AppCtx.Provider value={ctx}>
       <div className="app">
-        <header className="topbar">
-          <a className="brand" href={`#${ws[4]}`}>
-            <span className="logo">{ws[2]}</span> {ws[3]}
+        <div className="service-rail">
+          <a className="app-mark" href="#/" aria-label="AWS Tool Web home" title="AWS Tool Web" onClick={(e) => { e.preventDefault(); switchWorkspace('dynamodb'); }}>
+            <span aria-hidden="true" />
           </a>
-          <div className="seg ws-switch" role="tablist" aria-label="Service">
-            {WORKSPACES.map(([id, label]) => (
-              <button key={id} role="tab" aria-selected={workspace === id} className={workspace === id ? 'active' : ''} onClick={() => switchWorkspace(id)}>
-                {label}
+          <nav className="service-tabs" role="tablist" aria-label="Service">
+            {WORKSPACES.map(([id, label, glyph, , , shortLabel]) => (
+              <button key={id} type="button" role="tab" aria-label={label} title={label} aria-selected={workspace === id} onClick={() => switchWorkspace(id)}>
+                <span className="service-glyph" aria-hidden="true">{glyph || <span className="lock-glyph" />}</span>
+                <span>{shortLabel}</span>
               </button>
             ))}
+          </nav>
+        </div>
+        <header className="topbar">
+          <div className="workspace-title">
+            <button className="btn sidebar-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}>Browse</button>
+            <a className="brand" href={`#${ws[4]}`}>{ws[3]}</a>
           </div>
           <div className="conn-picker">
-            <select value={connValue(conn)} onChange={(e) => onPick(e.target.value)} aria-label="Connection">
-              <option value="">— Select connection —</option>
-              {profiles.length > 0 && (
-                <optgroup label="AWS profiles">
-                  {profiles.map((p) => (
-                    <option key={p.name} value={`p:${p.name}`}>
-                      {p.name}
-                    </option>
-                  ))}
+            <label className="header-field">
+              <span>Connection</span>
+              <select value={connValue(conn)} onChange={(e) => onPick(e.target.value)} aria-label="Connection">
+                <option value="">— Select connection —</option>
+                {profiles.length > 0 && (
+                  <optgroup label="AWS profiles">
+                    {profiles.map((p) => <option key={p.name} value={`p:${p.name}`}>{p.name}</option>)}
+                  </optgroup>
+                )}
+                {endpoints.length > 0 && (
+                  <optgroup label="Custom endpoints (DynamoDB Local…)">
+                    {endpoints.map((e) => <option key={e.id} value={`e:${e.id}`}>{e.name}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="Other">
+                  <option value="d">Default credential chain (env / instance role)</option>
                 </optgroup>
-              )}
-              {endpoints.length > 0 && (
-                <optgroup label="Custom endpoints (DynamoDB Local…)">
-                  {endpoints.map((e) => (
-                    <option key={e.id} value={`e:${e.id}`}>
-                      {e.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="Other">
-                <option value="d">Default credential chain (env / instance role)</option>
-              </optgroup>
-            </select>
-            {conn && conn.kind !== 'endpoint' && (
-              <select value={conn.region || ''} onChange={(e) => setConn({ ...conn, region: e.target.value })} aria-label="Region">
-                {[...new Set([conn.region, ...REGIONS].filter(Boolean))].map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
               </select>
+            </label>
+            {conn && conn.kind !== 'endpoint' && (
+              <label className="header-field">
+                <span>Region</span>
+                <select value={conn.region || ''} onChange={(e) => setConn({ ...conn, region: e.target.value })} aria-label="Region">
+                  {[...new Set([conn.region, ...REGIONS].filter(Boolean))].map((r) => <option key={r}>{r}</option>)}
+                </select>
+              </label>
             )}
-            {conn && conn.kind === 'endpoint' && <span className="chip">{info.endpoint}</span>}
+            {conn?.kind === 'endpoint' && info.endpoint && (
+              <div className="header-field header-endpoint"><span>Endpoint</span><code className="chip" title={info.endpoint}>{info.endpoint}</code></div>
+            )}
             {conn && (
               <span
-                className={`status-dot ${status ? (status.ok ? 'ok' : 'bad') : 'wait'}`}
+                className={`connection-status ${status ? (status.ok ? 'ok' : 'bad') : 'wait'}`}
                 title={status ? (status.ok ? status.identity?.arn || 'Connected' : status.error) : 'Checking…'}
-              />
+                role="status"
+              >
+                <span className={`status-dot ${status ? (status.ok ? 'ok' : 'bad') : 'wait'}`} aria-hidden="true" />
+                {status ? (status.ok ? 'Connected' : 'Connection issue') : 'Checking…'}
+              </span>
             )}
-            {status?.ok && status.identity && <span className="muted small hide-sm">{status.identity.account}</span>}
+            {status?.ok && status.identity && <span className="account-id hide-sm">{status.identity.account}</span>}
           </div>
-          <div className="topbar-right">
+          <label className="header-field topbar-right">
+            <span>Theme</span>
             <select value={theme} onChange={(e) => setTheme(e.target.value)} aria-label="Theme" className="theme-select">
               <option value="auto">Auto theme</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
-          </div>
+          </label>
         </header>
 
-        <aside className="sidebar">
+        <aside id="workspace-sidebar" className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
           {sfnws ? (
             <SfnSidebar
               conn={conn}
@@ -437,6 +470,11 @@ function Shell() {
               current={currentLogGroup}
               page={isLogs ? logArg[0] || 'home' : section}
             />
+          ) : secretsws ? (
+            <nav className="nav">
+              <a href="#/secrets" className={isSecrets ? 'active' : ''}><span className="lock-glyph" aria-hidden="true" /> Secrets</a>
+              <a href="#/connections" className={section === 'connections' ? 'active' : ''}><span className="nav-glyph" aria-hidden="true">⚙</span> Connections</a>
+            </nav>
           ) : s3ws ? (
             <nav className="nav">
               <a href="#/s3" className={isS3 && !currentBucket ? 'active' : ''}>🪣 Buckets</a>
@@ -450,7 +488,7 @@ function Shell() {
               <a href="#/modeler" className={section === 'modeler' ? 'active' : ''}>▦ Data modeler</a>
             </nav>
           )}
-          {logsws || sqsws || lambdaws || sfnws ? null : s3ws ? (
+          {logsws || sqsws || lambdaws || sfnws || secretsws ? null : s3ws ? (
             <>
               <div className="side-head">
                 <span>Buckets {conn && <span className="muted">({buckets.length})</span>}</span>

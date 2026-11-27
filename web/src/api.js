@@ -14,12 +14,12 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body, conn } = {}) {
+export async function api(path, { method = 'GET', body, conn, signal } = {}) {
   const headers = { 'x-requested-with': 'aws-tool-web' };
   const c = conn === undefined ? currentConn : conn;
   if (c) headers['x-conn'] = encodeURIComponent(JSON.stringify(c));
   if (body !== undefined) headers['content-type'] = 'application/json';
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), ...(signal ? { signal } : {}) });
   const text = await res.text();
   let data;
   try {
